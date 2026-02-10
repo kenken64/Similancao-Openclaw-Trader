@@ -340,6 +340,28 @@
         </div>
 
         <div class="trades-section">
+            <h2>OpenClaw AI Advisor Decisions</h2>
+            <div style="overflow-x: auto;">
+                <table class="trades-table" id="advisor-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Direction</th>
+                            <th>Entry Price</th>
+                            <th>Decision</th>
+                            <th>Reason</th>
+                            <th>Executed</th>
+                            <th>Response Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="advisor-body">
+                        <tr><td colspan="7" style="text-align: center; color: #666;">No advisor decisions yet</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="trades-section">
             <h2>Recent Trades</h2>
             <div style="overflow-x: auto;">
                 <table class="trades-table" id="trades-table">
@@ -501,6 +523,43 @@
                     }
                 })
                 .catch(err => console.error('Error fetching trades:', err));
+
+            // Fetch advisor decisions
+            fetch('/api/advisor/recent?limit=10')
+                .then(r => r.json())
+                .then(data => {
+                    const tbody = document.getElementById('advisor-body');
+                    if (data.decisions && data.decisions.length > 0) {
+                        tbody.innerHTML = data.decisions.map(decision => {
+                            const timestamp = new Date(decision.timestamp).toLocaleString('en-US', {
+                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                            });
+                            const approved = decision.approved;
+                            const executed = decision.trade_executed;
+                            const decisionClass = approved ? 'pnl-positive' : 'pnl-negative';
+                            const decisionText = approved ? '✅ APPROVED' : '❌ REJECTED';
+                            const executedBadge = executed ?
+                                '<span class="trade-status open">✓ YES</span>' :
+                                '<span class="trade-status closed">NO</span>';
+                            const responseTime = decision.response_time_ms ? decision.response_time_ms + 'ms' : '-';
+
+                            return `
+                                <tr>
+                                    <td>${timestamp}</td>
+                                    <td><span class="trade-direction ${decision.direction}">${decision.direction}</span></td>
+                                    <td>${decision.entry_price.toFixed(1)}</td>
+                                    <td class="${decisionClass}">${decisionText}</td>
+                                    <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(decision.advisor_reason || '-')}">${escapeHtml(decision.advisor_reason || '-')}</td>
+                                    <td>${executedBadge}</td>
+                                    <td>${responseTime}</td>
+                                </tr>
+                            `;
+                        }).join('');
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No advisor decisions yet</td></tr>';
+                    }
+                })
+                .catch(err => console.error('Error fetching advisor decisions:', err));
         }
 
         function escapeHtml(text) {

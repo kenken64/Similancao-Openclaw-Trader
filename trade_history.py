@@ -58,6 +58,28 @@ class TradeHistory:
                 )
             """)
 
+            # OpenClaw advisor log table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS advisor_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP NOT NULL,
+                    symbol TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    stop_loss REAL NOT NULL,
+                    take_profit REAL NOT NULL,
+                    confidence REAL,
+                    signal_reason TEXT,
+                    funding_rate REAL,
+                    approved BOOLEAN NOT NULL,
+                    advisor_reason TEXT,
+                    response_time_ms INTEGER,
+                    trade_executed BOOLEAN DEFAULT FALSE,
+                    trade_id INTEGER,
+                    FOREIGN KEY (trade_id) REFERENCES trades(id)
+                )
+            """)
+
             # Create indexes for faster queries
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_entry_time
@@ -66,6 +88,10 @@ class TradeHistory:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_status
                 ON trades(status)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_advisor_timestamp
+                ON advisor_log(timestamp DESC)
             """)
 
             logger.info(f"✅ Trade history database initialized: {self.db_path}")
@@ -222,3 +248,100 @@ class TradeHistory:
                 ORDER BY entry_time DESC
             """, (start_date, end_date))
             return [dict(row) for row in cursor.fetchall()]
+
+    def log_advisor_decision(
+        self,
+        symbol: str,
+        direction: str,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        confidence: float,
+        signal_reason: str,
+        funding_rate: float,
+        approved: bool,
+        advisor_reason: str,
+        response_time_ms: int = 0
+    ) -> int:
+        """Log OpenClaw advisor decision"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO advisor_log (
+                    timestamp, symbol, direction, entry_price, stop_loss,
+                    take_profit, confidence, signal_reason, funding_rate,
+                    approved, advisor_reason, response_time_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                datetime.now(), symbol, direction, entry_price, stop_loss,
+                take_profit, confidence, signal_reason, funding_rate,
+                approved, advisor_reason, response_time_ms
+            ))
+            advisor_log_id = cursor.lastrowid
+
+            status = "✅ APPROVED" if approved else "❌ REJECTED"
+            logger.info(f"📝 Advisor decision logged #{advisor_log_id}: {status} - {advisor_reason}")
+            return advisor_log_id
+
+    def link_advisor_to_trade(self, advisor_log_id: int, trade_id: int):
+        """Link an advisor log entry to an executed trade"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE advisor_log
+                SET trade_executed = TRUE, trade_id = ?
+                WHERE id = ?
+            """, (trade_id, advisor_log_id))
+
+    def get_recent_advisor_decisions(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recent OpenClaw advisor decisions"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM advisor_log
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_advisor_statistics(self) -> Dict[str, Any]:
+        """Get advisor decision statistics"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT
+                    COUNT(*) as total_decisions,
+                    SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) as approved_count,
+                    SUM(CASE WHEN approved = 0 THEN 1 ELSE 0 END) as rejected_count,
+                    SUM(CASE WHEN trade_executed = 1 THEN 1 ELSE 0 END) as executed_count,
+                    AVG(response_time_ms) as avg_response_time
+                FROM advisor_log
+            """)
+            row = cursor.fetchone()
+
+            if not row or row[0] == 0:
+                return {
+                    "total_decisions": 0,
+                    "approved_count": 0,
+                    "rejected_count": 0,
+                    "executed_count": 0,
+                    "approval_rate": 0.0,
+                    "execution_rate": 0.0,
+                    "avg_response_time_ms": 0
+                }
+
+            total = row[0]
+            approved = row[1] or 0
+            rejected = row[2] or 0
+            executed = row[3] or 0
+
+            return {
+                "total_decisions": total,
+                "approved_count": approved,
+                "rejected_count": rejected,
+                "executed_count": executed,
+                "approval_rate": (approved / total * 100) if total > 0 else 0.0,
+                "execution_rate": (executed / approved * 100) if approved > 0 else 0.0,
+                "avg_response_time_ms": int(row[4] or 0)
+            }

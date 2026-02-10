@@ -68,6 +68,19 @@ def get_open_trade():
     trade = trade_history.get_open_trade()
     return jsonify({"trade": trade})
 
+@app.route('/api/advisor/recent')
+def get_recent_advisor_decisions():
+    """API endpoint for recent OpenClaw advisor decisions"""
+    limit = request.args.get('limit', 10, type=int)
+    decisions = trade_history.get_recent_advisor_decisions(limit=limit)
+    return jsonify({"decisions": decisions})
+
+@app.route('/api/advisor/statistics')
+def get_advisor_statistics():
+    """API endpoint for advisor statistics"""
+    stats = trade_history.get_advisor_statistics()
+    return jsonify(stats)
+
 def update_state_from_log():
     """Parse log file to update dashboard state"""
     while True:

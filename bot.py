@@ -45,17 +45,18 @@ def send_alert(message: str):
         pass  # Non-critical
 
 
-def ask_advisor(signal, price, funding_rate) -> bool:
+def ask_advisor(signal, price, funding_rate, trade_history) -> tuple:
     """Ask OpenClaw AI to analyze trade before execution.
 
     Sends trade details to OpenClaw API for AI analysis.
-    Returns True if approved, False if rejected or error.
+    Returns (approved: bool, advisor_log_id: int or None)
     """
     if not Config.ADVISOR_MODE:
-        return True  # Skip advisor, auto-approve
+        return True, None  # Skip advisor, auto-approve
 
     logger.info(f"🧠 Asking OpenClaw AI for trade analysis...")
 
+    start_time = time.time()
     try:
         # Prepare trade data for OpenClaw analysis
         trade_data = {
@@ -78,10 +79,27 @@ def ask_advisor(signal, price, funding_rate) -> bool:
             timeout=Config.ADVISOR_TIMEOUT_SECONDS
         )
 
+        response_time_ms = int((time.time() - start_time) * 1000)
+
         if response.status_code == 200:
             result = response.json()
             approved = result.get("approve", False)
             reason = result.get("reason", "No reason provided")
+
+            # Log advisor decision to database
+            advisor_log_id = trade_history.log_advisor_decision(
+                symbol=Config.SYMBOL,
+                direction=signal.direction,
+                entry_price=signal.entry_price,
+                stop_loss=signal.stop_loss,
+                take_profit=signal.take_profit,
+                confidence=signal.confidence,
+                signal_reason=signal.reason,
+                funding_rate=funding_rate,
+                approved=approved,
+                advisor_reason=reason,
+                response_time_ms=response_time_ms
+            )
 
             if approved:
                 logger.info(f"✅ OpenClaw APPROVED: {reason}")
@@ -91,7 +109,7 @@ def ask_advisor(signal, price, funding_rate) -> bool:
                     f"{'🔴' if signal.direction == 'SHORT' else '🟢'} {signal.direction} {Config.SYMBOL} @ {signal.entry_price:.1f}\n"
                     f"Reason: {reason}"
                 )
-                return True
+                return True, advisor_log_id
             else:
                 logger.info(f"❌ OpenClaw REJECTED: {reason}")
                 # Send notification
@@ -100,21 +118,64 @@ def ask_advisor(signal, price, funding_rate) -> bool:
                     f"Signal: {signal.direction} @ {signal.entry_price:.1f}\n"
                     f"Reason: {reason}"
                 )
-                return False
+                return False, advisor_log_id
         else:
             logger.warning(f"OpenClaw API error: HTTP {response.status_code}")
-            # Fail-safe: reject on API error
+            # Log error decision
+            advisor_log_id = trade_history.log_advisor_decision(
+                symbol=Config.SYMBOL,
+                direction=signal.direction,
+                entry_price=signal.entry_price,
+                stop_loss=signal.stop_loss,
+                take_profit=signal.take_profit,
+                confidence=signal.confidence,
+                signal_reason=signal.reason,
+                funding_rate=funding_rate,
+                approved=False,
+                advisor_reason=f"API Error: HTTP {response.status_code}",
+                response_time_ms=response_time_ms
+            )
             send_alert(f"⚠️ OpenClaw API error (HTTP {response.status_code}) - trade skipped")
-            return False
+            return False, advisor_log_id
 
     except requests.Timeout:
+        response_time_ms = int((time.time() - start_time) * 1000)
         logger.warning("⏰ OpenClaw API timeout — trade SKIPPED")
+        # Log timeout decision
+        advisor_log_id = trade_history.log_advisor_decision(
+            symbol=Config.SYMBOL,
+            direction=signal.direction,
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            confidence=signal.confidence,
+            signal_reason=signal.reason,
+            funding_rate=funding_rate,
+            approved=False,
+            advisor_reason="Timeout",
+            response_time_ms=response_time_ms
+        )
         send_alert("⏰ OpenClaw timeout - trade skipped for safety")
-        return False
+        return False, advisor_log_id
     except Exception as e:
+        response_time_ms = int((time.time() - start_time) * 1000)
         logger.error(f"OpenClaw advisor error: {e}")
+        # Log error decision
+        advisor_log_id = trade_history.log_advisor_decision(
+            symbol=Config.SYMBOL,
+            direction=signal.direction,
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            confidence=signal.confidence,
+            signal_reason=signal.reason,
+            funding_rate=funding_rate,
+            approved=False,
+            advisor_reason=f"Error: {str(e)}",
+            response_time_ms=response_time_ms
+        )
         send_alert(f"❌ OpenClaw error: {e} - trade skipped")
-        return False  # Fail-safe: don't trade if advisor is broken
+        return False, advisor_log_id
 
 
 def main():
@@ -221,8 +282,9 @@ def main():
                     logger.info(f"   Entry: {signal.entry_price:.1f} | SL: {signal.stop_loss:.1f} | TP: {signal.take_profit:.1f}")
                     logger.info(f"   Qty: {qty} | Confidence: {signal.confidence:.0%}")
 
-                    # Ask advisor (Similancao) for approval
-                    if not ask_advisor(signal, price, funding_rate):
+                    # Ask advisor (OpenClaw AI) for approval
+                    approved, advisor_log_id = ask_advisor(signal, price, funding_rate, trade_history)
+                    if not approved:
                         logger.info("⏭️ Trade skipped by advisor")
                         time.sleep(Config.CHECK_INTERVAL)
                         continue
@@ -256,6 +318,10 @@ def main():
                             funding_rate=funding_rate,
                             confidence=signal.confidence
                         )
+
+                        # Link advisor decision to executed trade
+                        if advisor_log_id:
+                            trade_history.link_advisor_to_trade(advisor_log_id, current_trade_id)
 
                         alert = (
                             f"{'🔴' if signal.direction == 'SHORT' else '🟢'} {signal.direction} {Config.SYMBOL}\n"
