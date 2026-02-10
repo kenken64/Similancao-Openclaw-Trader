@@ -19,6 +19,7 @@ from config import Config
 from binance_client import BinanceFuturesClient
 from strategy import analyze
 from risk_manager import RiskManager
+from trade_history import TradeHistory
 
 # === Logging Setup ===
 log_fmt = "%(asctime)s [%(levelname)s] %(message)s"
@@ -138,7 +139,11 @@ def main():
     client = BinanceFuturesClient(dry_run=dry_run)
     balance = client.get_account_balance()
     risk = RiskManager(initial_balance=balance)
+    trade_history = TradeHistory()
     logger.info(f"💰 Starting balance: {balance:.2f} USDT")
+
+    # Track current trade ID for exits
+    current_trade_id = None
 
     # Check if there's already an open position (live mode)
     if not dry_run:
@@ -177,9 +182,15 @@ def main():
                         logger.info(f"🎯 [DRY-RUN] Take-profit HIT! {pos['direction']} closed @ {price:.1f} | PnL: +{pnl:.2f} USDT")
                         send_alert(f"🎯 TP hit! {pos['direction']} closed +{pnl:.2f} USDT")
                     else:
-                        pnl = abs(pos["sl"] - pos["entry"]) * pos["qty"]
-                        logger.info(f"🛑 [DRY-RUN] Stop-loss HIT! {pos['direction']} closed @ {price:.1f} | PnL: -{pnl:.2f} USDT")
-                        send_alert(f"🛑 SL hit! {pos['direction']} closed -{pnl:.2f} USDT")
+                        pnl = -abs(pos["sl"] - pos["entry"]) * pos["qty"]
+                        logger.info(f"🛑 [DRY-RUN] Stop-loss HIT! {pos['direction']} closed @ {price:.1f} | PnL: -{abs(pnl):.2f} USDT")
+                        send_alert(f"🛑 SL hit! {pos['direction']} closed {pnl:.2f} USDT")
+
+                    # Record exit in trade history
+                    if current_trade_id:
+                        trade_history.record_exit(current_trade_id, price, exit_type, pnl)
+                        current_trade_id = None
+
                     risk.set_position_closed()
 
             # Live: check if position was closed externally
@@ -187,6 +198,10 @@ def main():
                 pos = client.get_position()
                 if not pos:
                     logger.info("📭 Position closed (externally or by SL/TP)")
+                    # Record exit in trade history
+                    if current_trade_id:
+                        trade_history.record_exit(current_trade_id, price, "EXTERNAL", None)
+                        current_trade_id = None
                     risk.set_position_closed()
 
             # Look for new signals if no position
@@ -225,6 +240,21 @@ def main():
                         risk.set_position_open(
                             signal.direction, signal.entry_price,
                             signal.stop_loss, signal.take_profit, qty
+                        )
+
+                        # Record trade entry in database
+                        current_trade_id = trade_history.record_entry(
+                            symbol=Config.SYMBOL,
+                            direction=signal.direction,
+                            entry_price=signal.entry_price,
+                            quantity=qty,
+                            stop_loss=signal.stop_loss,
+                            take_profit=signal.take_profit,
+                            mode="LIVE" if not dry_run else "DRY-RUN",
+                            reason=signal.reason,
+                            advisor_approved=True,
+                            funding_rate=funding_rate,
+                            confidence=signal.confidence
                         )
 
                         alert = (

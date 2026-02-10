@@ -1,6 +1,12 @@
 # Environment variables - NEVER commit API keys!
 .env
 
+# Database - Trade history (contains sensitive data)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
 # Python
 __pycache__/
 *.py[cod]

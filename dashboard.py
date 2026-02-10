@@ -7,11 +7,15 @@ import os
 import json
 import threading
 from datetime import datetime
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
+from trade_history import TradeHistory
 
 app = Flask(__name__)
 CORS(app)
+
+# Initialize trade history
+trade_history = TradeHistory()
 
 # Shared state
 bot_state = {
@@ -44,6 +48,25 @@ def get_logs():
             return jsonify({"logs": recent_logs})
     except FileNotFoundError:
         return jsonify({"logs": ["Log file not found"]})
+
+@app.route('/api/trades/recent')
+def get_recent_trades():
+    """API endpoint for recent trades"""
+    limit = request.args.get('limit', 20, type=int)
+    trades = trade_history.get_recent_trades(limit=limit)
+    return jsonify({"trades": trades})
+
+@app.route('/api/trades/statistics')
+def get_statistics():
+    """API endpoint for trading statistics"""
+    stats = trade_history.get_statistics()
+    return jsonify(stats)
+
+@app.route('/api/trades/open')
+def get_open_trade():
+    """API endpoint for current open trade"""
+    trade = trade_history.get_open_trade()
+    return jsonify({"trade": trade})
 
 def update_state_from_log():
     """Parse log file to update dashboard state"""
