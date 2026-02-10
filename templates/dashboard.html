@@ -370,8 +370,8 @@
     </div>
 
     <script>
-        // Balance visibility state
-        let balanceVisible = localStorage.getItem('balanceVisible') !== 'false'; // Default to visible
+        // Balance visibility state (default to hidden for privacy)
+        let balanceVisible = localStorage.getItem('balanceVisible') === 'true'; // Default to hidden
         let actualBalance = 0;
 
         // Toggle balance visibility
