@@ -77,23 +77,28 @@ def update_state_from_log():
                     lines = f.readlines()
                     if lines:
                         bot_state['last_update'] = datetime.now().isoformat()
-                        # Parse recent activity
-                        for line in lines[-20:]:
+
+                        # Search entire log for last balance update (not just recent lines)
+                        for line in reversed(lines):
                             if 'Starting balance' in line:
                                 try:
                                     bal = line.split('balance: ')[1].split(' USDT')[0]
                                     bot_state['balance'] = float(bal)
-                                    bot_state['status'] = "Running - Monitoring Market"
+                                    break  # Found it, stop searching
                                 except:
                                     pass
-                            elif 'OPENING' in line and ('SHORT' in line or 'LONG' in line):
+
+                        # Parse recent activity for status updates
+                        for line in lines[-20:]:
+                            if 'OPENING' in line and ('SHORT' in line or 'LONG' in line):
                                 bot_state['status'] = "Position Opened"
                             elif 'closed' in line.lower() and ('position' in line.lower() or 'tp' in line.lower() or 'sl' in line.lower()):
                                 bot_state['status'] = "Running - Monitoring Market"
                                 bot_state['position'] = None
                             elif '📍' in line and 'Price:' in line:
                                 # Bot is actively checking market
-                                bot_state['status'] = "Running - Monitoring Market"
+                                if bot_state['status'] != "Position Opened":
+                                    bot_state['status'] = "Running - Monitoring Market"
                                 if 'Pos: No' in line:
                                     bot_state['position'] = None
                             elif 'HALTING' in line or 'stopped' in line.lower():
