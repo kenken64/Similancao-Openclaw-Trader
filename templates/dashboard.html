@@ -160,6 +160,111 @@
             font-size: 0.9em;
             margin-top: 10px;
         }
+
+        .trades-section {
+            margin-top: 30px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: #1a1f3a;
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid #2a3152;
+            text-align: center;
+        }
+
+        .stat-card h3 {
+            font-size: 0.9em;
+            color: #8b9dc3;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .stat-card .value.positive {
+            color: #4caf50;
+        }
+
+        .stat-card .value.negative {
+            color: #f44336;
+        }
+
+        .trades-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #1a1f3a;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .trades-table th {
+            background: #2a3152;
+            color: #8b9dc3;
+            padding: 12px;
+            text-align: left;
+            font-size: 0.9em;
+        }
+
+        .trades-table td {
+            padding: 10px 12px;
+            border-top: 1px solid #2a3152;
+            font-size: 0.85em;
+        }
+
+        .trades-table tr:hover {
+            background: #252a45;
+        }
+
+        .trade-direction {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.8em;
+        }
+
+        .trade-direction.LONG {
+            background: #1b5e20;
+            color: #4caf50;
+        }
+
+        .trade-direction.SHORT {
+            background: #b71c1c;
+            color: #f44336;
+        }
+
+        .pnl-positive {
+            color: #4caf50;
+        }
+
+        .pnl-negative {
+            color: #f44336;
+        }
+
+        .trade-status {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+        }
+
+        .trade-status.open {
+            background: #1565c0;
+            color: #2196f3;
+        }
+
+        .trade-status.closed {
+            background: #424242;
+            color: #bdbdbd;
+        }
     </style>
 </head>
 <body>
@@ -187,6 +292,50 @@
             <div class="card">
                 <h2>Position</h2>
                 <div class="stat position" id="position">None</div>
+            </div>
+        </div>
+
+        <div class="trades-section">
+            <h2>Trading Statistics</h2>
+            <div class="stats-grid" id="stats-grid">
+                <div class="stat-card">
+                    <h3>Total Trades</h3>
+                    <div class="value" id="total-trades">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Win Rate</h3>
+                    <div class="value" id="win-rate">0%</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Total PnL</h3>
+                    <div class="value" id="total-pnl">+0.00 USDT</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Avg PnL</h3>
+                    <div class="value" id="avg-pnl">+0.00 USDT</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="trades-section">
+            <h2>Recent Trades</h2>
+            <div style="overflow-x: auto;">
+                <table class="trades-table" id="trades-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Direction</th>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>PnL</th>
+                            <th>PnL %</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trades-body">
+                        <tr><td colspan="7" style="text-align: center; color: #666;">No trades yet</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -241,6 +390,58 @@
                     }
                 })
                 .catch(err => console.error('Error fetching logs:', err));
+
+            // Fetch trade statistics
+            fetch('/api/trades/statistics')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('total-trades').textContent = data.total_trades || 0;
+                    document.getElementById('win-rate').textContent = (data.win_rate || 0).toFixed(1) + '%';
+
+                    const totalPnl = data.total_pnl || 0;
+                    const totalPnlEl = document.getElementById('total-pnl');
+                    totalPnlEl.textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + ' USDT';
+                    totalPnlEl.className = 'value ' + (totalPnl >= 0 ? 'positive' : 'negative');
+
+                    const avgPnl = data.avg_pnl || 0;
+                    const avgPnlEl = document.getElementById('avg-pnl');
+                    avgPnlEl.textContent = (avgPnl >= 0 ? '+' : '') + avgPnl.toFixed(2) + ' USDT';
+                    avgPnlEl.className = 'value ' + (avgPnl >= 0 ? 'positive' : 'negative');
+                })
+                .catch(err => console.error('Error fetching statistics:', err));
+
+            // Fetch recent trades
+            fetch('/api/trades/recent?limit=10')
+                .then(r => r.json())
+                .then(data => {
+                    const tbody = document.getElementById('trades-body');
+                    if (data.trades && data.trades.length > 0) {
+                        tbody.innerHTML = data.trades.map(trade => {
+                            const entryTime = new Date(trade.entry_time).toLocaleString('en-US', {
+                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                            });
+                            const exitPrice = trade.exit_price ? trade.exit_price.toFixed(1) : '-';
+                            const pnl = trade.pnl !== null ? trade.pnl.toFixed(2) : '-';
+                            const pnlPct = trade.pnl_percentage !== null ? trade.pnl_percentage.toFixed(2) + '%' : '-';
+                            const pnlClass = trade.pnl !== null ? (trade.pnl >= 0 ? 'pnl-positive' : 'pnl-negative') : '';
+
+                            return `
+                                <tr>
+                                    <td>${entryTime}</td>
+                                    <td><span class="trade-direction ${trade.direction}">${trade.direction}</span></td>
+                                    <td>${trade.entry_price.toFixed(1)}</td>
+                                    <td>${exitPrice}</td>
+                                    <td class="${pnlClass}">${pnl !== '-' ? (trade.pnl >= 0 ? '+' : '') + pnl : '-'}</td>
+                                    <td class="${pnlClass}">${pnlPct !== '-' ? (trade.pnl_percentage >= 0 ? '+' : '') + pnlPct : '-'}</td>
+                                    <td><span class="trade-status ${trade.status}">${trade.status.toUpperCase()}</span></td>
+                                </tr>
+                            `;
+                        }).join('');
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No trades yet</td></tr>';
+                    }
+                })
+                .catch(err => console.error('Error fetching trades:', err));
         }
 
         function escapeHtml(text) {
