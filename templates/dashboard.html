@@ -265,6 +265,25 @@
             background: #424242;
             color: #bdbdbd;
         }
+
+        .balance-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .balance-toggle {
+            cursor: pointer;
+            font-size: 1.2em;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            user-select: none;
+        }
+
+        .balance-toggle:hover {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -286,7 +305,10 @@
 
             <div class="card">
                 <h2>Balance</h2>
-                <div class="stat balance" id="balance">0.00 USDT</div>
+                <div class="balance-container">
+                    <div class="stat balance" id="balance">0.00 USDT</div>
+                    <span class="balance-toggle" id="balance-toggle" title="Show/Hide Balance">👁️</span>
+                </div>
             </div>
 
             <div class="card">
@@ -348,13 +370,50 @@
     </div>
 
     <script>
+        // Balance visibility state
+        let balanceVisible = localStorage.getItem('balanceVisible') !== 'false'; // Default to visible
+        let actualBalance = 0;
+
+        // Toggle balance visibility
+        function toggleBalance() {
+            balanceVisible = !balanceVisible;
+            localStorage.setItem('balanceVisible', balanceVisible);
+            updateBalanceDisplay();
+
+            // Update icon
+            const toggleBtn = document.getElementById('balance-toggle');
+            toggleBtn.textContent = balanceVisible ? '👁️' : '🔒';
+            toggleBtn.title = balanceVisible ? 'Hide Balance' : 'Show Balance';
+        }
+
+        function updateBalanceDisplay() {
+            const balanceEl = document.getElementById('balance');
+            if (balanceVisible) {
+                balanceEl.textContent = actualBalance.toFixed(2) + ' USDT';
+            } else {
+                balanceEl.textContent = '•••.•• USDT';
+            }
+        }
+
+        // Set initial icon state
+        document.addEventListener('DOMContentLoaded', () => {
+            const toggleBtn = document.getElementById('balance-toggle');
+            toggleBtn.textContent = balanceVisible ? '👁️' : '🔒';
+            toggleBtn.title = balanceVisible ? 'Hide Balance' : 'Show Balance';
+            toggleBtn.addEventListener('click', toggleBalance);
+        });
+
         // Update dashboard every 2 seconds
         function updateDashboard() {
             fetch('/api/status')
                 .then(r => r.json())
                 .then(data => {
                     document.getElementById('status').textContent = data.status || 'Running';
-                    document.getElementById('balance').textContent = (data.balance || 0).toFixed(2) + ' USDT';
+
+                    // Store actual balance and update display based on visibility
+                    actualBalance = data.balance || 0;
+                    updateBalanceDisplay();
+
                     document.getElementById('position').textContent = data.position || 'None';
 
                     const modeEl = document.getElementById('mode');
