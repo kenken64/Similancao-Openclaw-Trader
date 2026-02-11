@@ -22,6 +22,7 @@ bot_state = {
     "status": "Starting...",
     "balance": 0.0,
     "position": None,
+    "position_pnl": None,
     "last_update": None,
     "logs": [],
     "trades": [],
@@ -53,8 +54,10 @@ def get_logs():
 def get_recent_trades():
     """API endpoint for recent trades"""
     limit = request.args.get('limit', 20, type=int)
-    trades = trade_history.get_recent_trades(limit=limit)
-    return jsonify({"trades": trades})
+    offset = request.args.get('offset', 0, type=int)
+    trades = trade_history.get_recent_trades(limit=limit, offset=offset)
+    total = trade_history.get_trades_count()
+    return jsonify({"trades": trades, "total": total})
 
 @app.route('/api/trades/statistics')
 def get_statistics():
@@ -72,8 +75,10 @@ def get_open_trade():
 def get_recent_advisor_decisions():
     """API endpoint for recent OpenClaw advisor decisions"""
     limit = request.args.get('limit', 10, type=int)
-    decisions = trade_history.get_recent_advisor_decisions(limit=limit)
-    return jsonify({"decisions": decisions})
+    offset = request.args.get('offset', 0, type=int)
+    decisions = trade_history.get_recent_advisor_decisions(limit=limit, offset=offset)
+    total = trade_history.get_advisor_decisions_count()
+    return jsonify({"decisions": decisions, "total": total})
 
 @app.route('/api/advisor/statistics')
 def get_advisor_statistics():
@@ -101,6 +106,13 @@ def update_state_from_log():
                                 except:
                                     pass
 
+                        # Scan for mode (search more lines since errors can push it out)
+                        for line in lines[-50:]:
+                            if 'LIVE' in line and '🔴' in line:
+                                bot_state['mode'] = "LIVE"
+                            elif 'DRY-RUN' in line and '🧪' in line:
+                                bot_state['mode'] = "DRY-RUN"
+
                         # Parse recent activity for status updates
                         for line in lines[-20:]:
                             if 'OPENING' in line and ('SHORT' in line or 'LONG' in line):
@@ -108,18 +120,37 @@ def update_state_from_log():
                             elif 'closed' in line.lower() and ('position' in line.lower() or 'tp' in line.lower() or 'sl' in line.lower()):
                                 bot_state['status'] = "Running - Monitoring Market"
                                 bot_state['position'] = None
+                                bot_state['position_pnl'] = None
+                            elif '📌 Existing position:' in line:
+                                try:
+                                    parts = line.split('Existing position: ')[1].strip()
+                                    bot_state['position'] = parts
+                                    bot_state['status'] = "Position Opened"
+                                except:
+                                    pass
+                            elif 'Position PnL:' in line:
+                                try:
+                                    # e.g. "Position PnL: -5.45 USDT | LONG 0.069 @ 69139.1"
+                                    pnl_part = line.split('Position PnL: ')[1].strip()
+                                    bot_state['position_pnl'] = pnl_part
+                                    # Extract position info after the pipe
+                                    if '|' in pnl_part:
+                                        pos_info = pnl_part.split('|')[1].strip()
+                                        bot_state['position'] = pos_info
+                                    bot_state['status'] = "Position Opened"
+                                except:
+                                    pass
                             elif '📍' in line and 'Price:' in line:
                                 # Bot is actively checking market
                                 if bot_state['status'] != "Position Opened":
                                     bot_state['status'] = "Running - Monitoring Market"
                                 if 'Pos: No' in line:
                                     bot_state['position'] = None
+                                    bot_state['position_pnl'] = None
+                                elif 'Pos: Yes' in line and not bot_state['position']:
+                                    bot_state['status'] = "Position Opened"
                             elif 'HALTING' in line or 'stopped' in line.lower():
                                 bot_state['status'] = "Stopped"
-                            elif 'LIVE' in line and '🔴' in line:
-                                bot_state['mode'] = "LIVE"
-                            elif 'DRY-RUN' in line and '🧪' in line:
-                                bot_state['mode'] = "DRY-RUN"
         except Exception as e:
             print(f"Error updating state: {e}")
 

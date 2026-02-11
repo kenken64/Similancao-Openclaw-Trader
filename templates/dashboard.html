@@ -284,6 +284,38 @@
         .balance-toggle:hover {
             opacity: 1;
         }
+
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .pagination button {
+            background: #2a3152;
+            color: #e0e0e0;
+            border: 1px solid #3a4172;
+            border-radius: 6px;
+            padding: 6px 14px;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: #3a4172;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+
+        .pagination .page-info {
+            color: #8b9dc3;
+            font-size: 0.85em;
+        }
     </style>
 </head>
 <body>
@@ -314,6 +346,7 @@
             <div class="card">
                 <h2>Position</h2>
                 <div class="stat position" id="position">None</div>
+                <div class="stat" id="position-pnl" style="margin-top: 8px; font-size: 1.1em;"></div>
             </div>
         </div>
 
@@ -358,6 +391,11 @@
                         <tr><td colspan="7" style="text-align: center; color: #666;">No advisor decisions yet</td></tr>
                     </tbody>
                 </table>
+                <div class="pagination" id="advisor-pagination">
+                    <button id="advisor-prev" onclick="changeAdvisorPage(-1)">Prev</button>
+                    <span class="page-info" id="advisor-page-info">Page 1 of 1</span>
+                    <button id="advisor-next" onclick="changeAdvisorPage(1)">Next</button>
+                </div>
             </div>
         </div>
 
@@ -380,6 +418,11 @@
                         <tr><td colspan="7" style="text-align: center; color: #666;">No trades yet</td></tr>
                     </tbody>
                 </table>
+                <div class="pagination" id="trades-pagination">
+                    <button id="trades-prev" onclick="changeTradesPage(-1)">Prev</button>
+                    <span class="page-info" id="trades-page-info">Page 1 of 1</span>
+                    <button id="trades-next" onclick="changeTradesPage(1)">Next</button>
+                </div>
             </div>
         </div>
 
@@ -393,8 +436,15 @@
 
     <script>
         // Balance visibility state (default to hidden for privacy)
-        let balanceVisible = localStorage.getItem('balanceVisible') === 'true'; // Default to hidden
+        let balanceVisible = localStorage.getItem('balanceVisible') === 'true';
         let actualBalance = 0;
+
+        // Pagination state
+        const PAGE_SIZE = 10;
+        let tradesPage = 1;
+        let tradesTotalPages = 1;
+        let advisorPage = 1;
+        let advisorTotalPages = 1;
 
         // Toggle balance visibility
         function toggleBalance() {
@@ -402,7 +452,6 @@
             localStorage.setItem('balanceVisible', balanceVisible);
             updateBalanceDisplay();
 
-            // Update icon
             const toggleBtn = document.getElementById('balance-toggle');
             toggleBtn.textContent = balanceVisible ? '👁️' : '🔒';
             toggleBtn.title = balanceVisible ? 'Hide Balance' : 'Show Balance';
@@ -425,76 +474,41 @@
             toggleBtn.addEventListener('click', toggleBalance);
         });
 
-        // Update dashboard every 2 seconds
-        function updateDashboard() {
-            fetch('/api/status')
+        function changeTradesPage(delta) {
+            const newPage = tradesPage + delta;
+            if (newPage < 1 || newPage > tradesTotalPages) return;
+            tradesPage = newPage;
+            fetchTrades();
+        }
+
+        function changeAdvisorPage(delta) {
+            const newPage = advisorPage + delta;
+            if (newPage < 1 || newPage > advisorTotalPages) return;
+            advisorPage = newPage;
+            fetchAdvisorDecisions();
+        }
+
+        function updateTradesPagination() {
+            document.getElementById('trades-page-info').textContent = `Page ${tradesPage} of ${tradesTotalPages}`;
+            document.getElementById('trades-prev').disabled = tradesPage <= 1;
+            document.getElementById('trades-next').disabled = tradesPage >= tradesTotalPages;
+        }
+
+        function updateAdvisorPagination() {
+            document.getElementById('advisor-page-info').textContent = `Page ${advisorPage} of ${advisorTotalPages}`;
+            document.getElementById('advisor-prev').disabled = advisorPage <= 1;
+            document.getElementById('advisor-next').disabled = advisorPage >= advisorTotalPages;
+        }
+
+        function fetchTrades() {
+            const offset = (tradesPage - 1) * PAGE_SIZE;
+            fetch(`/api/trades/recent?limit=${PAGE_SIZE}&offset=${offset}`)
                 .then(r => r.json())
                 .then(data => {
-                    document.getElementById('status').textContent = data.status || 'Running';
+                    tradesTotalPages = Math.max(1, Math.ceil((data.total || 0) / PAGE_SIZE));
+                    if (tradesPage > tradesTotalPages) tradesPage = tradesTotalPages;
+                    updateTradesPagination();
 
-                    // Store actual balance and update display based on visibility
-                    actualBalance = data.balance || 0;
-                    updateBalanceDisplay();
-
-                    document.getElementById('position').textContent = data.position || 'None';
-
-                    const modeEl = document.getElementById('mode');
-                    modeEl.textContent = data.mode;
-                    modeEl.className = 'mode ' + (data.mode === 'LIVE' ? 'live' : 'dry-run');
-
-                    if (data.last_update) {
-                        const date = new Date(data.last_update);
-                        document.getElementById('last-update').textContent =
-                            'Last update: ' + date.toLocaleTimeString();
-                    }
-                })
-                .catch(err => console.error('Error fetching status:', err));
-
-            fetch('/api/logs')
-                .then(r => r.json())
-                .then(data => {
-                    const logsEl = document.getElementById('logs');
-                    if (data.logs && data.logs.length > 0) {
-                        logsEl.innerHTML = data.logs
-                            .map(line => {
-                                let className = 'log-line';
-                                if (line.includes('[ERROR]')) className += ' error';
-                                else if (line.includes('[WARNING]')) className += ' warning';
-                                else if (line.includes('[INFO]')) className += ' info';
-
-                                return `<div class="${className}">${escapeHtml(line)}</div>`;
-                            })
-                            .join('');
-
-                        // Auto-scroll to bottom
-                        logsEl.scrollTop = logsEl.scrollHeight;
-                    }
-                })
-                .catch(err => console.error('Error fetching logs:', err));
-
-            // Fetch trade statistics
-            fetch('/api/trades/statistics')
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('total-trades').textContent = data.total_trades || 0;
-                    document.getElementById('win-rate').textContent = (data.win_rate || 0).toFixed(1) + '%';
-
-                    const totalPnl = data.total_pnl || 0;
-                    const totalPnlEl = document.getElementById('total-pnl');
-                    totalPnlEl.textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + ' USDT';
-                    totalPnlEl.className = 'value ' + (totalPnl >= 0 ? 'positive' : 'negative');
-
-                    const avgPnl = data.avg_pnl || 0;
-                    const avgPnlEl = document.getElementById('avg-pnl');
-                    avgPnlEl.textContent = (avgPnl >= 0 ? '+' : '') + avgPnl.toFixed(2) + ' USDT';
-                    avgPnlEl.className = 'value ' + (avgPnl >= 0 ? 'positive' : 'negative');
-                })
-                .catch(err => console.error('Error fetching statistics:', err));
-
-            // Fetch recent trades
-            fetch('/api/trades/recent?limit=10')
-                .then(r => r.json())
-                .then(data => {
                     const tbody = document.getElementById('trades-body');
                     if (data.trades && data.trades.length > 0) {
                         tbody.innerHTML = data.trades.map(trade => {
@@ -523,11 +537,17 @@
                     }
                 })
                 .catch(err => console.error('Error fetching trades:', err));
+        }
 
-            // Fetch advisor decisions
-            fetch('/api/advisor/recent?limit=10')
+        function fetchAdvisorDecisions() {
+            const offset = (advisorPage - 1) * PAGE_SIZE;
+            fetch(`/api/advisor/recent?limit=${PAGE_SIZE}&offset=${offset}`)
                 .then(r => r.json())
                 .then(data => {
+                    advisorTotalPages = Math.max(1, Math.ceil((data.total || 0) / PAGE_SIZE));
+                    if (advisorPage > advisorTotalPages) advisorPage = advisorTotalPages;
+                    updateAdvisorPagination();
+
                     const tbody = document.getElementById('advisor-body');
                     if (data.decisions && data.decisions.length > 0) {
                         tbody.innerHTML = data.decisions.map(decision => {
@@ -562,16 +582,94 @@
                 .catch(err => console.error('Error fetching advisor decisions:', err));
         }
 
+        // Update dashboard — auto-refreshes tables only when on page 1
+        function updateDashboard() {
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('status').textContent = data.status || 'Running';
+
+                    actualBalance = data.balance || 0;
+                    updateBalanceDisplay();
+
+                    document.getElementById('position').textContent = data.position || 'None';
+
+                    const pnlEl = document.getElementById('position-pnl');
+                    if (data.position_pnl) {
+                        pnlEl.textContent = data.position_pnl;
+                        pnlEl.style.color = data.position_pnl.includes('+') ? '#00c853' : '#ff1744';
+                    } else {
+                        pnlEl.textContent = '';
+                    }
+
+                    const modeEl = document.getElementById('mode');
+                    modeEl.textContent = data.mode;
+                    modeEl.className = 'mode ' + (data.mode === 'LIVE' ? 'live' : 'dry-run');
+
+                    if (data.last_update) {
+                        const date = new Date(data.last_update);
+                        document.getElementById('last-update').textContent =
+                            'Last update: ' + date.toLocaleTimeString();
+                    }
+                })
+                .catch(err => console.error('Error fetching status:', err));
+
+            fetch('/api/logs')
+                .then(r => r.json())
+                .then(data => {
+                    const logsEl = document.getElementById('logs');
+                    if (data.logs && data.logs.length > 0) {
+                        logsEl.innerHTML = data.logs
+                            .map(line => {
+                                let className = 'log-line';
+                                if (line.includes('[ERROR]')) className += ' error';
+                                else if (line.includes('[WARNING]')) className += ' warning';
+                                else if (line.includes('[INFO]')) className += ' info';
+
+                                return `<div class="${className}">${escapeHtml(line)}</div>`;
+                            })
+                            .join('');
+
+                        logsEl.scrollTop = logsEl.scrollHeight;
+                    }
+                })
+                .catch(err => console.error('Error fetching logs:', err));
+
+            fetch('/api/trades/statistics')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('total-trades').textContent = data.total_trades || 0;
+                    document.getElementById('win-rate').textContent = (data.win_rate || 0).toFixed(1) + '%';
+
+                    const totalPnl = data.total_pnl || 0;
+                    const totalPnlEl = document.getElementById('total-pnl');
+                    totalPnlEl.textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + ' USDT';
+                    totalPnlEl.className = 'value ' + (totalPnl >= 0 ? 'positive' : 'negative');
+
+                    const avgPnl = data.avg_pnl || 0;
+                    const avgPnlEl = document.getElementById('avg-pnl');
+                    avgPnlEl.textContent = (avgPnl >= 0 ? '+' : '') + avgPnl.toFixed(2) + ' USDT';
+                    avgPnlEl.className = 'value ' + (avgPnl >= 0 ? 'positive' : 'negative');
+                })
+                .catch(err => console.error('Error fetching statistics:', err));
+
+            // Only auto-refresh tables when on page 1
+            if (tradesPage === 1) fetchTrades();
+            if (advisorPage === 1) fetchAdvisorDecisions();
+        }
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
 
-        // Initial update
-        updateDashboard();
+        // Initial fetch for both tables
+        fetchTrades();
+        fetchAdvisorDecisions();
 
-        // Update every 2 seconds
+        // Initial update + auto-refresh every 2 seconds
+        updateDashboard();
         setInterval(updateDashboard, 2000);
     </script>
 </body>

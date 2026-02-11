@@ -180,16 +180,23 @@ class TradeHistory:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def get_recent_trades(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_recent_trades(self, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
         """Get recent trades"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT * FROM trades
                 ORDER BY entry_time DESC
-                LIMIT ?
-            """, (limit,))
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_trades_count(self) -> int:
+        """Get total number of trades"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM trades")
+            return cursor.fetchone()[0]
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get trading statistics"""
@@ -293,16 +300,23 @@ class TradeHistory:
                 WHERE id = ?
             """, (trade_id, advisor_log_id))
 
-    def get_recent_advisor_decisions(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_recent_advisor_decisions(self, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
         """Get recent OpenClaw advisor decisions"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT * FROM advisor_log
                 ORDER BY timestamp DESC
-                LIMIT ?
-            """, (limit,))
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_advisor_decisions_count(self) -> int:
+        """Get total number of advisor decisions"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM advisor_log")
+            return cursor.fetchone()[0]
 
     def get_advisor_statistics(self) -> Dict[str, Any]:
         """Get advisor decision statistics"""
