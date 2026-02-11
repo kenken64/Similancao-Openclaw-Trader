@@ -5,17 +5,42 @@ Displays bot status, recent trades, and logs in real-time
 """
 import os
 import json
+import time
 import threading
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 from trade_history import TradeHistory
+from binance_client import BinanceFuturesClient
 
 app = Flask(__name__)
 CORS(app)
 
 # Initialize trade history
 trade_history = TradeHistory()
+
+# Lazy-initialized Binance client for live balance queries
+_binance_client = None
+_cached_balance = 0.0
+_balance_last_fetched = 0
+
+def _get_live_balance():
+    """Fetch live balance from Binance, cached for 30 seconds."""
+    global _binance_client, _cached_balance, _balance_last_fetched
+    now = time.time()
+    if now - _balance_last_fetched < 30:
+        return _cached_balance
+    if _binance_client is None:
+        try:
+            _binance_client = BinanceFuturesClient(dry_run=True)
+        except Exception:
+            return _cached_balance
+    try:
+        _cached_balance = _binance_client.get_live_balance()
+        _balance_last_fetched = now
+    except Exception:
+        pass
+    return _cached_balance
 
 # Shared state
 bot_state = {
@@ -37,7 +62,11 @@ def index():
 @app.route('/api/status')
 def get_status():
     """API endpoint for current bot status"""
-    return jsonify(bot_state)
+    state = dict(bot_state)
+    live_bal = _get_live_balance()
+    if live_bal > 0:
+        state['balance'] = live_bal
+    return jsonify(state)
 
 @app.route('/api/logs')
 def get_logs():
@@ -154,7 +183,6 @@ def update_state_from_log():
         except Exception as e:
             print(f"Error updating state: {e}")
 
-        import time
         time.sleep(2)  # Update every 2 seconds
 
 if __name__ == '__main__':

@@ -31,15 +31,28 @@ logging.basicConfig(level=getattr(logging, Config.LOG_LEVEL), format=log_fmt, ha
 logger = logging.getLogger("similancao")
 
 
+def _openclaw_headers():
+    """Build auth headers for OpenClaw gateway."""
+    headers = {"Content-Type": "application/json"}
+    if Config.OPENCLAW_GATEWAY_TOKEN:
+        headers["Authorization"] = f"Bearer {Config.OPENCLAW_GATEWAY_TOKEN}"
+    return headers
+
+
 def send_alert(message: str):
-    """Send WhatsApp alert via OpenClaw gateway."""
+    """Send WhatsApp alert via OpenClaw gateway /v1/chat/completions."""
     if not Config.OPENCLAW_ALERT_ENABLED:
         return
     try:
         requests.post(
-            f"{Config.OPENCLAW_GATEWAY_URL}/api/message/send",
-            json={"message": message},
-            timeout=5,
+            f"{Config.OPENCLAW_GATEWAY_URL}/v1/chat/completions",
+            headers=_openclaw_headers(),
+            json={
+                "model": "openclaw:main",
+                "messages": [{"role": "user", "content": f"Send this WhatsApp alert to me: {message}"}],
+                "stream": False,
+            },
+            timeout=15,
         )
     except Exception:
         pass  # Non-critical
@@ -48,7 +61,7 @@ def send_alert(message: str):
 def ask_advisor(signal, price, funding_rate, trade_history) -> tuple:
     """Ask OpenClaw AI to analyze trade before execution.
 
-    Sends trade details to OpenClaw API for AI analysis.
+    Sends trade details to OpenClaw /v1/chat/completions for AI analysis.
     Returns (approved: bool, advisor_log_id: int or None)
     """
     if not Config.ADVISOR_MODE:
@@ -58,24 +71,39 @@ def ask_advisor(signal, price, funding_rate, trade_history) -> tuple:
 
     start_time = time.time()
     try:
-        # Prepare trade data for OpenClaw analysis
-        trade_data = {
-            "symbol": Config.SYMBOL,
-            "direction": signal.direction,
-            "entry_price": signal.entry_price,
-            "stop_loss": signal.stop_loss,
-            "take_profit": signal.take_profit,
-            "confidence": signal.confidence,
-            "reason": signal.reason,
-            "current_price": price,
-            "funding_rate": funding_rate,
-            "timestamp": datetime.now().isoformat()
-        }
+        # Build analysis prompt for OpenClaw AI
+        prompt = (
+            f"Analyze this crypto futures trade and decide whether to APPROVE or REJECT it. "
+            f"Respond ONLY with valid JSON: {{\"approve\": true/false, \"reason\": \"your reason\"}}\n\n"
+            f"Trade Details:\n"
+            f"- Symbol: {Config.SYMBOL}\n"
+            f"- Direction: {signal.direction}\n"
+            f"- Entry Price: {signal.entry_price}\n"
+            f"- Stop Loss: {signal.stop_loss}\n"
+            f"- Take Profit: {signal.take_profit}\n"
+            f"- Confidence: {signal.confidence}\n"
+            f"- Signal Reason: {signal.reason}\n"
+            f"- Current Price: {price}\n"
+            f"- Funding Rate: {funding_rate}\n"
+            f"- Leverage: {Config.LEVERAGE}x\n"
+            f"- Position Size: {Config.POSITION_SIZE_USDT} USDT\n"
+            f"- Timestamp: {datetime.now().isoformat()}\n\n"
+            f"Consider risk/reward ratio, market conditions, and funding rate. "
+            f"Respond with JSON only."
+        )
 
-        # Send to OpenClaw for AI analysis
+        # Send to OpenClaw via /v1/chat/completions
         response = requests.post(
-            f"{Config.OPENCLAW_GATEWAY_URL}/api/trade/analyze",
-            json=trade_data,
+            f"{Config.OPENCLAW_GATEWAY_URL}/v1/chat/completions",
+            headers=_openclaw_headers(),
+            json={
+                "model": "openclaw:main",
+                "messages": [
+                    {"role": "system", "content": "You are a crypto trading risk advisor. Analyze trades and respond with JSON only: {\"approve\": true/false, \"reason\": \"explanation\"}"},
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": False,
+            },
             timeout=Config.ADVISOR_TIMEOUT_SECONDS
         )
 
@@ -83,8 +111,21 @@ def ask_advisor(signal, price, funding_rate, trade_history) -> tuple:
 
         if response.status_code == 200:
             result = response.json()
-            approved = result.get("approve", False)
-            reason = result.get("reason", "No reason provided")
+            # Parse OpenAI-compatible response
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            import json as _json
+            try:
+                parsed = _json.loads(content)
+            except _json.JSONDecodeError:
+                # Try to extract JSON from response text
+                import re
+                match = re.search(r'\{[^}]+\}', content)
+                if match:
+                    parsed = _json.loads(match.group())
+                else:
+                    parsed = {"approve": False, "reason": f"Could not parse advisor response: {content[:200]}"}
+            approved = parsed.get("approve", False)
+            reason = parsed.get("reason", "No reason provided")
 
             # Log advisor decision to database
             advisor_log_id = trade_history.log_advisor_decision(
@@ -211,7 +252,9 @@ def main():
         pos = client.get_position()
         if pos:
             risk.has_open_position = True
-            logger.info(f"📌 Existing position: {pos['side']} {pos['size']} @ {pos['entry_price']}")
+            pnl = pos.get('unrealized_pnl', 0)
+            pnl_sign = '+' if pnl >= 0 else ''
+            logger.info(f"📌 Existing position: {pos['side']} {pos['size']} @ {pos['entry_price']} | PnL: {pnl_sign}{pnl:.2f} USDT")
 
     iteration = 0
     while True:
@@ -227,7 +270,7 @@ def main():
             low_24h = float(ticker["lowPrice"])
             funding_rate = float(mark_info.get("lastFundingRate", 0))
 
-            if iteration % 20 == 1:  # Log status every ~5 min
+            if iteration % 4 == 1:  # Log status every ~5 min
                 logger.info(
                     f"📍 [{now}] Price: {price:.1f} | 24hLow: {low_24h:.1f} | "
                     f"Funding: {funding_rate:.4f} | Pos: {'Yes' if risk.has_open_position else 'No'}"
@@ -257,6 +300,11 @@ def main():
             # Live: check if position was closed externally
             if not dry_run and risk.has_open_position:
                 pos = client.get_position()
+                if pos and iteration % 4 == 1:
+                    pnl = pos.get('unrealized_pnl', 0)
+                    pnl_sign = '+' if pnl >= 0 else ''
+                    pnl_emoji = '🟢' if pnl >= 0 else '🔴'
+                    logger.info(f"{pnl_emoji} Position PnL: {pnl_sign}{pnl:.2f} USDT | {pos['side']} {pos['size']} @ {pos['entry_price']}")
                 if not pos:
                     logger.info("📭 Position closed (externally or by SL/TP)")
                     # Record exit in trade history
@@ -331,7 +379,7 @@ def main():
                         send_alert(alert)
 
             # Balance/drawdown check
-            if not dry_run and iteration % 40 == 0:
+            if not dry_run and iteration % 20 == 0:
                 bal = client.get_account_balance()
                 if not risk.update_balance(bal):
                     logger.critical("HALTING due to max drawdown")

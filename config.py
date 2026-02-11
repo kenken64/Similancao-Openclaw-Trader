@@ -10,6 +10,10 @@ class Config:
     API_KEY = os.getenv("BINANCE_API_KEY", "")
     API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 
+    # Binance API Proxy
+    PROXY_URL = os.getenv("BINANCE_PROXY_URL", "")
+    PROXY_API_KEY = os.getenv("BINANCE_PROXY_API_KEY", "")
+
     # Trading
     SYMBOL = os.getenv("SYMBOL", "BTCUSDT")
     TIMEFRAME = os.getenv("TIMEFRAME", "15m")
@@ -26,6 +30,9 @@ class Config:
     RISK_REWARD_RATIO = float(os.getenv("RISK_REWARD_RATIO", "2.0"))
     STOP_LOSS_BUFFER_PCT = float(os.getenv("STOP_LOSS_BUFFER_PCT", "0.15"))
 
+    # RSI
+    RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
+
     # Volume
     VOLUME_FILTER_RATIO = float(os.getenv("VOLUME_FILTER_RATIO", "0.8"))
 
@@ -35,7 +42,8 @@ class Config:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
     # Alerts
-    OPENCLAW_GATEWAY_URL = os.getenv("OPENCLAW_GATEWAY_URL", "http://localhost:4778")
+    OPENCLAW_GATEWAY_URL = os.getenv("OPENCLAW_GATEWAY_URL", "http://localhost:18789")
+    OPENCLAW_GATEWAY_TOKEN = os.getenv("OPENCLAW_GATEWAY_TOKEN", "")
     OPENCLAW_ALERT_ENABLED = os.getenv("OPENCLAW_ALERT_ENABLED", "true").lower() == "true"
 
     # Advisor Mode — ask Similancao before trading
