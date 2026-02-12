@@ -33,8 +33,9 @@ class Config:
     # RSI
     RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
 
-    # Volume
-    VOLUME_FILTER_RATIO = float(os.getenv("VOLUME_FILTER_RATIO", "0.8"))
+    # VWAP thresholds
+    VWAP_NEAR_PCT = float(os.getenv("VWAP_NEAR_PCT", "0.002"))   # 0.2% = "near VWAP"
+    VWAP_FAR_PCT = float(os.getenv("VWAP_FAR_PCT", "0.003"))     # 0.3% = "far from VWAP"
 
     # Bot
     CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL_SECONDS", "15"))

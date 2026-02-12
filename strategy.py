@@ -57,6 +57,19 @@ def compute_rsi(df: pd.DataFrame, period: int = None) -> pd.DataFrame:
     return df
 
 
+def compute_vwap(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute Volume Weighted Average Price with daily reset at 00:00 UTC.
+
+    Typical Price = (High + Low + Close) / 3
+    VWAP = cumulative(TP * Volume) / cumulative(Volume), reset each UTC day.
+    """
+    tp = (df["high"] + df["low"] + df["close"]) / 3
+    tp_vol = tp * df["volume"]
+    day = df["open_time"].dt.date
+    df["vwap"] = tp_vol.groupby(day).cumsum() / df["volume"].groupby(day).cumsum()
+    return df
+
+
 def find_swing_points(df: pd.DataFrame, lookback: int = 5) -> Tuple[List[float], List[float]]:
     """Find recent swing highs and swing lows.
     
@@ -101,7 +114,7 @@ def compute_signum_score(df: pd.DataFrame) -> int:
       2. Fast MA vs Mid MA spread:   sign(ma7 - ma25)
       3. Mid MA vs Slow MA spread:   sign(ma25 - ma99)
       4. RSI relative to midline:    sign(rsi - 50)
-      5. Volume vs average:          sign(volume - vol_ma20)
+      5. Price vs VWAP:              sign(close - vwap)
     """
     latest = df.iloc[-1]
     prev = df.iloc[-2]
@@ -110,7 +123,7 @@ def compute_signum_score(df: pd.DataFrame) -> int:
     s2 = int(np.sign(latest["ma7"] - latest["ma25"]))
     s3 = int(np.sign(latest["ma25"] - latest["ma99"]))
     s4 = int(np.sign(latest["rsi"] - 50)) if not pd.isna(latest["rsi"]) else 0
-    s5 = int(np.sign(latest["volume"] - latest["vol_ma20"]))
+    s5 = int(np.sign(latest["close"] - latest["vwap"])) if not pd.isna(latest.get("vwap", np.nan)) else 0
 
     return s1 + s2 + s3 + s4 + s5
 
@@ -257,16 +270,13 @@ def analyze(df: pd.DataFrame, low_24h: float) -> Optional[Signal]:
 
     df = compute_mas(df)
     df = compute_rsi(df)
+    df = compute_vwap(df)
     latest = df.iloc[-1]
     prev = df.iloc[-2]
     price = latest["close"]
     rsi = latest["rsi"] if not pd.isna(latest["rsi"]) else 50.0
+    vwap = latest["vwap"] if not pd.isna(latest.get("vwap", np.nan)) else None
     buffer_pct = Config.STOP_LOSS_BUFFER_PCT / 100
-
-    # Volume filter: skip if volume is too low
-    if latest["volume"] < latest["vol_ma20"] * Config.VOLUME_FILTER_RATIO:
-        logger.info(f"📊 Volume too low ({latest['volume']:.0f} vs avg {latest['vol_ma20']:.0f}) — skipping")
-        return None
 
     # Pre-compute swing points and structure
     swing_highs, swing_lows = find_swing_points(df, lookback=5)
@@ -278,8 +288,8 @@ def analyze(df: pd.DataFrame, low_24h: float) -> Optional[Signal]:
     has_lower_highs = detect_lower_highs(df)
     bounce_candle = latest["close"] > latest["open"] and prev["close"] < prev["open"]
     rejection_candle = latest["close"] < latest["open"] and prev["close"] > prev["open"]
-    volume_spike = latest["volume"] > latest["vol_ma20"] * 1.5
-    above_avg_volume = latest["volume"] > latest["vol_ma20"] * 1.2
+    volume_spike = prev["volume"] > prev["vol_ma20"] * 1.5
+    above_avg_volume = prev["volume"] > prev["vol_ma20"] * 1.2
 
     # Collect candidate signals — pick the best one
     best_signal: Optional[Signal] = None
@@ -628,6 +638,30 @@ def analyze(df: pd.DataFrame, low_24h: float) -> Optional[Signal]:
             best_signal.confidence = max(best_signal.confidence - 0.1, 0.0)
             best_signal.reason += f" | ⚠️ Signum +{signum_score} opposes"
 
+    # --- VWAP confidence adjustment ---
+    if best_signal and vwap:
+        vwap_pct = (price - vwap) / vwap  # positive = above VWAP, negative = below
+        if best_signal.direction == "LONG":
+            if abs(vwap_pct) <= Config.VWAP_NEAR_PCT and vwap_pct >= 0:
+                best_signal.confidence = min(best_signal.confidence + 0.10, 1.0)
+                best_signal.reason += f" | VWAP pullback support ({vwap:.1f})"
+            elif vwap_pct > Config.VWAP_NEAR_PCT:
+                best_signal.confidence = min(best_signal.confidence + 0.05, 1.0)
+                best_signal.reason += f" | Above VWAP ({vwap:.1f})"
+            elif vwap_pct < -Config.VWAP_FAR_PCT:
+                best_signal.confidence = max(best_signal.confidence - 0.05, 0.0)
+                best_signal.reason += f" | ⚠️ Well below VWAP ({vwap:.1f})"
+        elif best_signal.direction == "SHORT":
+            if abs(vwap_pct) <= Config.VWAP_NEAR_PCT and vwap_pct <= 0:
+                best_signal.confidence = min(best_signal.confidence + 0.10, 1.0)
+                best_signal.reason += f" | VWAP rally resistance ({vwap:.1f})"
+            elif vwap_pct < -Config.VWAP_NEAR_PCT:
+                best_signal.confidence = min(best_signal.confidence + 0.05, 1.0)
+                best_signal.reason += f" | Below VWAP ({vwap:.1f})"
+            elif vwap_pct > Config.VWAP_FAR_PCT:
+                best_signal.confidence = max(best_signal.confidence - 0.05, 0.0)
+                best_signal.reason += f" | ⚠️ Well above VWAP ({vwap:.1f})"
+
     # --- Log result ---
     if best_signal:
         icon = "🟢" if best_signal.direction == "LONG" else "🔴"
@@ -636,12 +670,13 @@ def analyze(df: pd.DataFrame, low_24h: float) -> Optional[Signal]:
             f"   Entry: {best_signal.entry_price:.1f} | SL: {best_signal.stop_loss:.1f} "
             f"| TP: {best_signal.take_profit:.1f} | Conf: {best_signal.confidence:.0%}"
         )
-        logger.info(f"   Signum score: {signum_score:+d}/5")
+        logger.info(f"   Signum score: {signum_score:+d}/5 | VWAP: {vwap:.1f}" if vwap else f"   Signum score: {signum_score:+d}/5")
         return best_signal
 
     # No signal
+    vwap_str = f" | VWAP: {vwap:.1f}" if vwap else ""
     logger.debug(
-        f"No signal | Price: {price:.1f} | RSI: {rsi:.1f} | Signum: {signum_score:+d} | MA7: {latest['ma7']:.1f} "
+        f"No signal | Price: {price:.1f} | RSI: {rsi:.1f} | Signum: {signum_score:+d}{vwap_str} | MA7: {latest['ma7']:.1f} "
         f"MA25: {latest['ma25']:.1f} MA99: {latest['ma99']:.1f} | 24hLow: {low_24h:.1f}"
     )
     return None

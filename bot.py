@@ -11,6 +11,9 @@ Usage:
 import os
 import sys
 import time
+import json
+import fcntl
+import uuid
 import logging
 import argparse
 import pandas as pd
@@ -18,7 +21,7 @@ import requests
 from datetime import datetime
 from config import Config
 from binance_client import BinanceFuturesClient
-from strategy import analyze, analyze_daily
+from strategy import analyze, analyze_daily, compute_vwap
 from risk_manager import RiskManager
 from trade_history import TradeHistory
 
@@ -59,7 +62,7 @@ def send_alert(message: str):
         pass  # Non-critical
 
 
-def ask_advisor(signal, price, funding_rate, trade_history, daily_context: str = "") -> tuple:
+def ask_advisor(signal, price, funding_rate, trade_history, daily_context: str = "", vwap: float = None) -> tuple:
     """Ask OpenClaw AI to analyze trade before execution.
 
     Sends trade details to OpenClaw /v1/chat/completions for AI analysis.
@@ -86,13 +89,15 @@ def ask_advisor(signal, price, funding_rate, trade_history, daily_context: str =
             f"- Confidence: {signal.confidence}\n"
             f"- Signal Reason: {signal.reason}\n"
             f"- Current Price: {price}\n"
+            f"- VWAP (intraday): {f'{vwap:.1f}' if vwap else 'N/A'}\n"
+            f"- Price vs VWAP: {f'{((price - vwap) / vwap * 100):+.2f}%' if vwap else 'N/A'}\n"
             f"- Funding Rate: {funding_rate}\n"
             f"- Leverage: {Config.LEVERAGE}x\n"
             f"- Position Size: {Config.POSITION_SIZE_USDT} USDT\n"
             f"- Timestamp: {datetime.now().isoformat()}\n\n"
             f"Daily (1D) Timeframe Context:\n"
             f"{daily_context if daily_context else 'N/A'}\n\n"
-            f"Consider risk/reward ratio, market conditions, funding rate, and the daily timeframe context above. "
+            f"Consider risk/reward ratio, market conditions, funding rate, VWAP position, and the daily timeframe context above. "
             f"If the 15m signal conflicts with the daily trend or is near a major daily S/R level, weigh that heavily. "
             f"You may keep the bot's suggested SL/TP or adjust them based on your analysis. "
             f"Respond with JSON only."
@@ -243,11 +248,75 @@ def ask_advisor(signal, price, funding_rate, trade_history, daily_context: str =
         return False, advisor_log_id, None, None
 
 
+LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.lock")
+
+
+def _get_mac_address() -> str:
+    """Get the machine's MAC address as a formatted string."""
+    mac_int = uuid.getnode()
+    return ':'.join(f'{(mac_int >> (8 * i)) & 0xFF:02x}' for i in range(5, -1, -1))
+
+
+def _check_stale_lock() -> bool:
+    """Check if an existing lock file is stale (owner process dead).
+    Returns True if lock is stale or doesn't exist, False if active."""
+    if not os.path.exists(LOCK_FILE):
+        return True
+    try:
+        with open(LOCK_FILE, "r") as f:
+            lock_data = json.loads(f.read())
+        pid = lock_data.get("pid")
+        mac = lock_data.get("mac")
+        my_mac = _get_mac_address()
+
+        if mac != my_mac:
+            logger.error(f"Lock owned by different machine (MAC: {mac}). This machine: {my_mac}")
+            return False
+
+        # Check if the PID is still alive
+        if pid:
+            try:
+                os.kill(pid, 0)  # signal 0 = check if process exists
+                return False  # Process is alive, lock is NOT stale
+            except ProcessLookupError:
+                logger.info(f"Stale lock detected (PID {pid} is dead) — reclaiming")
+                return True
+            except PermissionError:
+                return False  # Process exists but we can't signal it
+    except (json.JSONDecodeError, KeyError, TypeError):
+        # Corrupt lock file — treat as stale
+        return True
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description="SimilanCao Trader")
     parser.add_argument("--live", action="store_true", help="Enable live trading")
     parser.add_argument("--dry-run", action="store_true", default=True, help="Paper trading (default)")
     args = parser.parse_args()
+
+    my_mac = _get_mac_address()
+
+    # Check for stale lock before attempting flock
+    if not _check_stale_lock():
+        print(f"❌ Another bot instance is already running on this machine (MAC: {my_mac})! Exiting.")
+        logger.error(f"❌ Another bot instance is already running (MAC: {my_mac})! Exiting.")
+        sys.exit(1)
+
+    # Acquire exclusive file lock to prevent duplicate bot instances
+    lock_fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(f"❌ Another bot instance is already running (MAC: {my_mac})! Exiting.")
+        logger.error(f"❌ Another bot instance is already running (MAC: {my_mac})! Exiting.")
+        sys.exit(1)
+
+    # Write lock info with MAC address and PID
+    lock_info = json.dumps({"pid": os.getpid(), "mac": my_mac, "started": datetime.now().isoformat()})
+    lock_fd.write(lock_info)
+    lock_fd.flush()
+    logger.info(f"🔒 Lock acquired — PID: {os.getpid()} | MAC: {my_mac}")
 
     dry_run = not args.live
     mode = "🧪 DRY-RUN" if dry_run else "🔴 LIVE"
@@ -340,9 +409,19 @@ def main():
                     logger.warning(f"Daily kline fetch failed: {e}")
                     daily_analysis_cache = None
 
+            # Compute VWAP for status log and advisor
+            try:
+                df_vwap = compute_vwap(df.copy())
+                vwap_value = df_vwap.iloc[-1].get("vwap")
+                if pd.isna(vwap_value):
+                    vwap_value = None
+            except Exception:
+                vwap_value = None
+
             if iteration % 4 == 1:  # Log status every ~5 min
+                vwap_str = f" | VWAP: {vwap_value:.1f}" if vwap_value else ""
                 logger.info(
-                    f"📍 [{now}] Price: {price:.1f} | 24hLow: {low_24h:.1f} | "
+                    f"📍 [{now}] Price: {price:.1f}{vwap_str} | 24hLow: {low_24h:.1f} | "
                     f"Funding: {funding_rate:.4f} | Pos: {'Yes' if risk.has_open_position else 'No'}"
                 )
 
@@ -503,9 +582,9 @@ def main():
                     logger.info(f"   Entry: {signal.entry_price:.1f} | SL: {signal.stop_loss:.1f} | TP: {signal.take_profit:.1f}")
                     logger.info(f"   Qty: {qty} | Confidence: {signal.confidence:.0%}")
 
-                    # Ask advisor (OpenClaw AI) for approval — include daily context
+                    # Ask advisor (OpenClaw AI) for approval — include daily context and VWAP
                     daily_ctx = daily_analysis_cache["daily_summary"] if daily_analysis_cache else ""
-                    approved, advisor_log_id, advisor_sl, advisor_tp = ask_advisor(signal, price, funding_rate, trade_history, daily_context=daily_ctx)
+                    approved, advisor_log_id, advisor_sl, advisor_tp = ask_advisor(signal, price, funding_rate, trade_history, daily_context=daily_ctx, vwap=vwap_value)
                     if not approved:
                         logger.info("⏭️ Trade skipped by advisor")
                         time.sleep(Config.CHECK_INTERVAL)

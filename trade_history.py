@@ -164,9 +164,16 @@ class TradeHistory:
         funding_rate: float = 0.0,
         confidence: float = 0.0
     ) -> int:
-        """Record a new trade entry"""
+        """Record a new trade entry. Rejects if an open trade already exists."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            # Guard: prevent duplicate open trades
+            cursor.execute("SELECT id FROM trades WHERE status = 'open' LIMIT 1")
+            existing = cursor.fetchone()
+            if existing:
+                logger.warning(f"⚠️ Open trade #{existing['id']} already exists — skipping duplicate entry")
+                return existing['id']
+
             cursor.execute("""
                 INSERT INTO trades (
                     symbol, direction, entry_time, entry_price, quantity,
@@ -189,7 +196,7 @@ class TradeHistory:
         exit_type: str,
         pnl: float = None
     ):
-        """Record trade exit"""
+        """Record trade exit. Skips if trade is already closed."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
@@ -199,6 +206,11 @@ class TradeHistory:
 
             if not trade:
                 logger.error(f"Trade #{trade_id} not found")
+                return
+
+            # Guard: prevent duplicate close
+            if trade['status'] == 'closed':
+                logger.warning(f"⚠️ Trade #{trade_id} already closed — skipping duplicate exit")
                 return
 
             # Calculate PnL if not provided
@@ -214,7 +226,7 @@ class TradeHistory:
                 UPDATE trades
                 SET exit_time = ?, exit_price = ?, exit_type = ?,
                     pnl = ?, pnl_percentage = ?, status = 'closed'
-                WHERE id = ?
+                WHERE id = ? AND status = 'open'
             """, (datetime.now(), exit_price, exit_type, pnl, pnl_percentage, trade_id))
 
             emoji = "🎯" if pnl > 0 else "🛑"

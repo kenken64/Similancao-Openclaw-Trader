@@ -11,6 +11,9 @@ _base_url = Config.PROXY_URL.rstrip("/") if Config.PROXY_URL else "https://fapi.
 if Config.PROXY_API_KEY:
     _session.headers.update({"X-Proxy-Api-Key": Config.PROXY_API_KEY})
 
+# Paths that returned 404 — skip them to avoid spamming logs
+_dead_paths: set = set()
+
 
 def _timestamp_params(params: dict = None) -> dict:
     p = params or {}
@@ -20,9 +23,15 @@ def _timestamp_params(params: dict = None) -> dict:
 
 def _get(path: str, params: dict) -> list:
     """GET with retry, returns JSON list or empty list on failure."""
+    if path in _dead_paths:
+        return []
     for attempt in range(3):
         try:
             resp = _session.get(f"{_base_url}{path}", params=params)
+            if resp.status_code == 404:
+                logger.info(f"Whale tracker: {path} not available (404) — disabling")
+                _dead_paths.add(path)
+                return []
             if resp.status_code == 502 and attempt < 2:
                 time.sleep(2)
                 continue
