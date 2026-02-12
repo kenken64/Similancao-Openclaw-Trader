@@ -76,9 +76,18 @@ class TradeHistory:
                     response_time_ms INTEGER,
                     trade_executed BOOLEAN DEFAULT FALSE,
                     trade_id INTEGER,
+                    advisor_sl REAL,
+                    advisor_tp REAL,
                     FOREIGN KEY (trade_id) REFERENCES trades(id)
                 )
             """)
+
+            # Migration: add advisor_sl/advisor_tp if missing (existing DBs)
+            try:
+                cursor.execute("SELECT advisor_sl FROM advisor_log LIMIT 1")
+            except sqlite3.OperationalError:
+                cursor.execute("ALTER TABLE advisor_log ADD COLUMN advisor_sl REAL")
+                cursor.execute("ALTER TABLE advisor_log ADD COLUMN advisor_tp REAL")
 
             # Create indexes for faster queries
             cursor.execute("""
@@ -92,6 +101,50 @@ class TradeHistory:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_advisor_timestamp
                 ON advisor_log(timestamp DESC)
+            """)
+
+            # Backtest runs table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS backtest_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_time TIMESTAMP NOT NULL,
+                    days INTEGER NOT NULL,
+                    candle_count INTEGER NOT NULL,
+                    total_trades INTEGER NOT NULL,
+                    wins INTEGER NOT NULL,
+                    losses INTEGER NOT NULL,
+                    open_trades INTEGER NOT NULL,
+                    win_rate REAL NOT NULL,
+                    total_pnl REAL NOT NULL,
+                    avg_pnl REAL NOT NULL
+                )
+            """)
+
+            # Backtest trades table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS backtest_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL,
+                    entry_idx INTEGER NOT NULL,
+                    entry_time TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    direction TEXT NOT NULL,
+                    stop_loss REAL NOT NULL,
+                    take_profit REAL NOT NULL,
+                    confidence REAL NOT NULL,
+                    reason TEXT,
+                    exit_idx INTEGER,
+                    exit_time TEXT,
+                    exit_price REAL,
+                    exit_type TEXT,
+                    pnl REAL,
+                    FOREIGN KEY (run_id) REFERENCES backtest_runs(id)
+                )
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_backtest_run_time
+                ON backtest_runs(run_time DESC)
             """)
 
             logger.info(f"✅ Trade history database initialized: {self.db_path}")
@@ -142,7 +195,7 @@ class TradeHistory:
 
             # Get trade details to calculate PnL if not provided
             cursor.execute("SELECT * FROM trades WHERE id = ?", (trade_id,))
-            trade = cursor.row_factory(cursor, cursor.fetchone())
+            trade = cursor.fetchone()
 
             if not trade:
                 logger.error(f"Trade #{trade_id} not found")
@@ -268,7 +321,9 @@ class TradeHistory:
         funding_rate: float,
         approved: bool,
         advisor_reason: str,
-        response_time_ms: int = 0
+        response_time_ms: int = 0,
+        advisor_sl: float = None,
+        advisor_tp: float = None
     ) -> int:
         """Log OpenClaw advisor decision"""
         with self._get_connection() as conn:
@@ -277,12 +332,14 @@ class TradeHistory:
                 INSERT INTO advisor_log (
                     timestamp, symbol, direction, entry_price, stop_loss,
                     take_profit, confidence, signal_reason, funding_rate,
-                    approved, advisor_reason, response_time_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    approved, advisor_reason, response_time_ms,
+                    advisor_sl, advisor_tp
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 datetime.now(), symbol, direction, entry_price, stop_loss,
                 take_profit, confidence, signal_reason, funding_rate,
-                approved, advisor_reason, response_time_ms
+                approved, advisor_reason, response_time_ms,
+                advisor_sl, advisor_tp
             ))
             advisor_log_id = cursor.lastrowid
 
@@ -359,3 +416,80 @@ class TradeHistory:
                 "execution_rate": (executed / approved * 100) if approved > 0 else 0.0,
                 "avg_response_time_ms": int(row[4] or 0)
             }
+
+    # ------------------------------------------------------------------
+    # Backtest persistence
+    # ------------------------------------------------------------------
+
+    def save_backtest(self, days: int, result: dict) -> int:
+        """Save a backtest run and its trades to the database.
+
+        Args:
+            days: Number of days the backtest covered.
+            result: The dict returned by run_backtest() with trades/summary.
+
+        Returns:
+            The backtest run ID.
+        """
+        summary = result["summary"]
+        trades = result["trades"]
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO backtest_runs (
+                    run_time, days, candle_count, total_trades, wins,
+                    losses, open_trades, win_rate, total_pnl, avg_pnl
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                datetime.now(), days, len(result.get("candles", [])),
+                summary["total_trades"], summary["wins"], summary["losses"],
+                summary["open"], summary["win_rate"],
+                summary["total_pnl"], summary["avg_pnl"]
+            ))
+            run_id = cursor.lastrowid
+
+            for t in trades:
+                cursor.execute("""
+                    INSERT INTO backtest_trades (
+                        run_id, entry_idx, entry_time, entry_price, direction,
+                        stop_loss, take_profit, confidence, reason,
+                        exit_idx, exit_time, exit_price, exit_type, pnl
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    run_id, t["entry_idx"], t["entry_time"], t["entry_price"],
+                    t["direction"], t["stop_loss"], t["take_profit"],
+                    t["confidence"], t["reason"],
+                    t.get("exit_idx"), t.get("exit_time"),
+                    t.get("exit_price"), t.get("exit_type"), t.get("pnl")
+                ))
+
+            logger.info(f"📝 Backtest run #{run_id} saved: {summary['total_trades']} trades, {summary['win_rate']:.1f}% WR, PnL {summary['total_pnl']:+.2f}")
+            return run_id
+
+    def get_latest_backtest(self) -> Optional[Dict[str, Any]]:
+        """Get the most recent backtest run with its trades."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM backtest_runs ORDER BY run_time DESC LIMIT 1
+            """)
+            run = cursor.fetchone()
+            if not run:
+                return None
+
+            run_dict = dict(run)
+            cursor.execute("""
+                SELECT * FROM backtest_trades WHERE run_id = ? ORDER BY entry_idx
+            """, (run_dict["id"],))
+            run_dict["trades"] = [dict(row) for row in cursor.fetchall()]
+            return run_dict
+
+    def get_backtest_runs(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent backtest run summaries."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM backtest_runs ORDER BY run_time DESC LIMIT ?
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]

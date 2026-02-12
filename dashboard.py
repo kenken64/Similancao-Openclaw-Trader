@@ -5,13 +5,17 @@ Displays bot status, recent trades, and logs in real-time
 """
 import os
 import json
+import logging
 import time
 import threading
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 from trade_history import TradeHistory
 from binance_client import BinanceFuturesClient
+from backtest import run_backtest
 
 app = Flask(__name__)
 CORS(app)
@@ -19,28 +23,53 @@ CORS(app)
 # Initialize trade history
 trade_history = TradeHistory()
 
-# Lazy-initialized Binance client for live balance queries
+# Lazy-initialized Binance client for live queries
 _binance_client = None
 _cached_balance = 0.0
 _balance_last_fetched = 0
+_cached_position = None
+_position_last_fetched = 0
 
-def _get_live_balance():
-    """Fetch live balance from Binance, cached for 30 seconds."""
-    global _binance_client, _cached_balance, _balance_last_fetched
-    now = time.time()
-    if now - _balance_last_fetched < 30:
-        return _cached_balance
+def _get_binance_client():
+    global _binance_client
     if _binance_client is None:
         try:
             _binance_client = BinanceFuturesClient(dry_run=True)
         except Exception:
-            return _cached_balance
+            return None
+    return _binance_client
+
+def _get_live_balance():
+    """Fetch live balance from Binance, cached for 30 seconds."""
+    global _cached_balance, _balance_last_fetched
+    now = time.time()
+    if now - _balance_last_fetched < 30:
+        return _cached_balance
+    client = _get_binance_client()
+    if not client:
+        return _cached_balance
     try:
-        _cached_balance = _binance_client.get_live_balance()
+        _cached_balance = client.get_live_balance()
         _balance_last_fetched = now
     except Exception:
         pass
     return _cached_balance
+
+def _get_live_position():
+    """Fetch live position from Binance, cached for 10 seconds."""
+    global _cached_position, _position_last_fetched
+    now = time.time()
+    if now - _position_last_fetched < 10:
+        return _cached_position
+    client = _get_binance_client()
+    if not client:
+        return _cached_position
+    try:
+        _cached_position = client.get_live_position()
+        _position_last_fetched = now
+    except Exception:
+        pass
+    return _cached_position
 
 # Shared state
 bot_state = {
@@ -66,6 +95,12 @@ def get_status():
     live_bal = _get_live_balance()
     if live_bal > 0:
         state['balance'] = live_bal
+    pos = _get_live_position()
+    if pos:
+        state['position'] = f"{pos['side']} {pos['size']} @ {pos['entry_price']}"
+        pnl = pos['unrealized_pnl']
+        state['position_pnl'] = f"{pnl:+.2f} USDT | {pos['side']} {pos['size']} @ {pos['entry_price']}"
+        state['status'] = "Position Opened"
     return jsonify(state)
 
 @app.route('/api/logs')
@@ -114,6 +149,55 @@ def get_advisor_statistics():
     """API endpoint for advisor statistics"""
     stats = trade_history.get_advisor_statistics()
     return jsonify(stats)
+
+@app.route('/backtest')
+def backtest_page():
+    """Backtest dashboard page"""
+    return render_template('backtest.html')
+
+@app.route('/api/backtest/run', methods=['POST'])
+def run_backtest_api():
+    """Run backtest on historical data and return results."""
+    data = request.get_json(silent=True) or {}
+    days = min(int(data.get('days', 7)), 10)  # cap at 10 days
+    candle_count = days * 96  # 96 fifteen-minute candles per day
+
+    client = _get_binance_client()
+    if not client:
+        return jsonify({"error": "Binance client unavailable"}), 503
+
+    try:
+        df = client.get_klines(limit=candle_count, interval="15m")
+    except Exception as e:
+        return jsonify({"error": f"Failed to fetch klines: {e}"}), 500
+
+    # Compute low_24h from last 96 candles as fallback
+    low_24h = df["low"].tail(96).min()
+
+    result = run_backtest(df, low_24h)
+
+    # Save to SQLite for bot reference
+    try:
+        trade_history.save_backtest(days, result)
+    except Exception as e:
+        logger.warning(f"Failed to save backtest: {e}")
+
+    return jsonify(result)
+
+@app.route('/api/backtest/latest')
+def get_latest_backtest():
+    """API endpoint for most recent backtest results."""
+    result = trade_history.get_latest_backtest()
+    if not result:
+        return jsonify({"error": "No backtest runs found"}), 404
+    return jsonify(result)
+
+@app.route('/api/backtest/runs')
+def get_backtest_runs():
+    """API endpoint for backtest run history."""
+    limit = request.args.get('limit', 10, type=int)
+    runs = trade_history.get_backtest_runs(limit=limit)
+    return jsonify({"runs": runs})
 
 def update_state_from_log():
     """Parse log file to update dashboard state"""

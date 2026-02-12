@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run SimilanCao Trader with Dashboard
-# Usage: ./run_with_dashboard.sh [--live]
+# Usage: ./run_with_dashboard.sh [--dry-run]
 
 echo "======================================"
 echo "🐆 SimilanCao Trader with Dashboard"
@@ -25,7 +25,7 @@ fi
 
 # Start dashboard in background
 echo "🌐 Starting dashboard on http://localhost:8080"
-python dashboard.py &
+python3 dashboard.py &
 DASHBOARD_PID=$!
 
 # Wait a moment for dashboard to start
@@ -33,12 +33,12 @@ sleep 2
 
 # Start bot with arguments
 echo "🐆 Starting trading bot..."
-if [ "$1" == "--live" ]; then
-    echo "⚠️  LIVE TRADING MODE ENABLED"
-    python bot.py --live
-else
+if [ "$1" == "--dry-run" ]; then
     echo "🧪 DRY-RUN MODE (paper trading)"
-    python bot.py
+    python3 bot.py
+else
+    echo "⚠️  LIVE TRADING MODE ENABLED"
+    python3 bot.py --live
 fi
 
 # Cleanup: kill dashboard when bot stops

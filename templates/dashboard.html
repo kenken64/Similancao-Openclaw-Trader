@@ -3,497 +3,211 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🐆 SimiLancao OpenClaw Trader</title>
+    <title>SimiLancao OpenClaw Trader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        base: '#0a0e27',
+                        card: '#1a1f3a',
+                        border: '#2a3152',
+                        'border-hover': '#3a4172',
+                        muted: '#8b9dc3',
+                        terminal: '#0f1419',
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #0a0e27;
-            color: #e0e0e0;
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        header {
-            text-align: center;
-            padding: 20px 0;
-            border-bottom: 2px solid #1e2642;
-            margin-bottom: 30px;
-        }
-
-        h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .card {
-            background: #1a1f3a;
-            border-radius: 10px;
-            padding: 20px;
-            border: 1px solid #2a3152;
-        }
-
-        .card h2 {
-            font-size: 1.2em;
-            margin-bottom: 15px;
-            color: #8b9dc3;
-        }
-
-        .stat {
-            font-size: 2em;
-            font-weight: bold;
-            margin: 10px 0;
-        }
-
-        .stat.balance {
-            color: #4caf50;
-        }
-
-        .stat.position {
-            color: #ff9800;
-        }
-
-        .mode {
-            display: inline-block;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.9em;
-            font-weight: bold;
-        }
-
-        .mode.dry-run {
-            background: #2196f3;
-            color: white;
-        }
-
-        .mode.live {
-            background: #f44336;
-            color: white;
-        }
-
-        .logs {
-            background: #1a1f3a;
-            border-radius: 10px;
-            padding: 20px;
-            border: 1px solid #2a3152;
-        }
-
-        .logs h2 {
-            margin-bottom: 15px;
-            color: #8b9dc3;
-        }
-
-        .log-container {
-            background: #0f1419;
-            border-radius: 5px;
-            padding: 15px;
-            max-height: 400px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 0.85em;
-            line-height: 1.6;
-        }
-
-        .log-line {
-            margin-bottom: 5px;
-            white-space: pre-wrap;
-            word-break: break-all;
-        }
-
-        .log-line.info {
-            color: #4caf50;
-        }
-
-        .log-line.error {
-            color: #f44336;
-        }
-
-        .log-line.warning {
-            color: #ff9800;
-        }
-
-        .timestamp {
-            color: #666;
-            margin-right: 10px;
-        }
-
-        .status-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 8px;
-            animation: pulse 2s infinite;
-        }
-
-        .status-indicator.active {
-            background: #4caf50;
-        }
-
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: 0.5;
-            }
-        }
-
-        .last-update {
-            color: #666;
-            font-size: 0.9em;
-            margin-top: 10px;
-        }
-
-        .trades-section {
-            margin-top: 30px;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .stat-card {
-            background: #1a1f3a;
-            border-radius: 8px;
-            padding: 15px;
-            border: 1px solid #2a3152;
-            text-align: center;
-        }
-
-        .stat-card h3 {
-            font-size: 0.9em;
-            color: #8b9dc3;
-            margin-bottom: 10px;
-        }
-
-        .stat-card .value {
-            font-size: 1.5em;
-            font-weight: bold;
-        }
-
-        .stat-card .value.positive {
-            color: #4caf50;
-        }
-
-        .stat-card .value.negative {
-            color: #f44336;
-        }
-
-        .trades-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: #1a1f3a;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        .trades-table th {
-            background: #2a3152;
-            color: #8b9dc3;
-            padding: 12px;
-            text-align: left;
-            font-size: 0.9em;
-        }
-
-        .trades-table td {
-            padding: 10px 12px;
-            border-top: 1px solid #2a3152;
-            font-size: 0.85em;
-        }
-
-        .trades-table tr:hover {
-            background: #252a45;
-        }
-
-        .trade-direction {
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-weight: bold;
-            font-size: 0.8em;
-        }
-
-        .trade-direction.LONG {
-            background: #1b5e20;
-            color: #4caf50;
-        }
-
-        .trade-direction.SHORT {
-            background: #b71c1c;
-            color: #f44336;
-        }
-
-        .pnl-positive {
-            color: #4caf50;
-        }
-
-        .pnl-negative {
-            color: #f44336;
-        }
-
-        .trade-status {
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 0.8em;
-        }
-
-        .trade-status.open {
-            background: #1565c0;
-            color: #2196f3;
-        }
-
-        .trade-status.closed {
-            background: #424242;
-            color: #bdbdbd;
-        }
-
-        .balance-container {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-        }
-
-        .balance-toggle {
-            cursor: pointer;
-            font-size: 1.2em;
-            opacity: 0.6;
-            transition: opacity 0.2s;
-            user-select: none;
-        }
-
-        .balance-toggle:hover {
-            opacity: 1;
-        }
-
-        .pagination {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            margin-top: 12px;
-        }
-
-        .pagination button {
-            background: #2a3152;
-            color: #e0e0e0;
-            border: 1px solid #3a4172;
-            border-radius: 6px;
-            padding: 6px 14px;
-            cursor: pointer;
-            font-size: 0.85em;
-        }
-
-        .pagination button:hover:not(:disabled) {
-            background: #3a4172;
-        }
-
-        .pagination button:disabled {
-            opacity: 0.4;
-            cursor: default;
-        }
-
-        .pagination .page-info {
-            color: #8b9dc3;
-            font-size: 0.85em;
-        }
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .pulse-dot { animation: pulse-dot 2s infinite; }
+        /* keep log line classes for JS toggling */
+        .log-line.info { color: #4caf50; }
+        .log-line.error { color: #f44336; }
+        .log-line.warning { color: #ff9800; }
     </style>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <h1>🐆 SimiLancao OpenClaw Trader</h1>
-            <div id="mode" class="mode dry-run">DRY-RUN</div>
+<body class="bg-base text-gray-200 font-sans p-3 sm:p-5">
+    <div class="max-w-[1400px] mx-auto">
+
+        <!-- Header -->
+        <header class="text-center py-5 border-b-2 border-border mb-8">
+            <h1 class="text-2xl sm:text-4xl font-bold mb-2">SimiLancao OpenClaw Trader</h1>
+            <div class="mb-3">
+                <a href="/backtest" class="text-muted hover:text-white text-sm transition-colors">Backtest &rarr;</a>
+            </div>
+            <span id="mode" class="inline-block px-4 py-1 rounded-full text-sm font-bold bg-blue-600 text-white">DRY-RUN</span>
         </header>
 
-        <div class="grid">
-            <div class="card">
-                <h2>Status</h2>
-                <div>
-                    <span class="status-indicator active"></span>
-                    <span id="status">Running</span>
+        <!-- Status / Balance / Position cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
+            <div class="bg-card rounded-xl p-5 border border-border">
+                <h2 class="text-sm text-muted mb-3">Status</h2>
+                <div class="flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-green-500 pulse-dot"></span>
+                    <span id="status" class="text-lg font-semibold">Running</span>
                 </div>
-                <div class="last-update" id="last-update">Never</div>
+                <div class="text-gray-500 text-sm mt-2" id="last-update">Never</div>
             </div>
-
-            <div class="card">
-                <h2>Balance</h2>
-                <div class="balance-container">
-                    <div class="stat balance" id="balance">0.00 USDT</div>
-                    <span class="balance-toggle" id="balance-toggle" title="Show/Hide Balance">👁️</span>
+            <div class="bg-card rounded-xl p-5 border border-border">
+                <h2 class="text-sm text-muted mb-3">Balance</h2>
+                <div class="flex items-center justify-center gap-3">
+                    <span id="balance" class="text-2xl sm:text-3xl font-bold text-green-500">0.00 USDT</span>
+                    <span id="balance-toggle" class="cursor-pointer text-xl opacity-60 hover:opacity-100 select-none transition-opacity" title="Show/Hide Balance">🔒</span>
                 </div>
             </div>
-
-            <div class="card">
-                <h2>Position</h2>
-                <div class="stat position" id="position">None</div>
-                <div class="stat" id="position-pnl" style="margin-top: 8px; font-size: 1.1em;"></div>
-            </div>
-        </div>
-
-        <div class="trades-section">
-            <h2>Trading Statistics</h2>
-            <div class="stats-grid" id="stats-grid">
-                <div class="stat-card">
-                    <h3>Total Trades</h3>
-                    <div class="value" id="total-trades">0</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Win Rate</h3>
-                    <div class="value" id="win-rate">0%</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Total PnL</h3>
-                    <div class="value" id="total-pnl">+0.00 USDT</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Avg PnL</h3>
-                    <div class="value" id="avg-pnl">+0.00 USDT</div>
-                </div>
+            <div class="bg-card rounded-xl p-5 border border-border">
+                <h2 class="text-sm text-muted mb-3">Position</h2>
+                <div id="position" class="text-2xl sm:text-3xl font-bold text-orange-400">None</div>
+                <div id="position-pnl" class="text-base font-bold mt-2"></div>
             </div>
         </div>
 
-        <div class="trades-section">
-            <h2>OpenClaw AI Advisor Decisions</h2>
-            <div style="overflow-x: auto;">
-                <table class="trades-table" id="advisor-table">
+        <!-- Trading Statistics -->
+        <section class="mb-8">
+            <h2 class="text-lg font-semibold text-muted mb-4">Trading Statistics</h2>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div class="bg-card rounded-lg p-4 border border-border text-center">
+                    <h3 class="text-xs text-muted mb-2">Total Trades</h3>
+                    <div class="text-xl font-bold" id="total-trades">0</div>
+                </div>
+                <div class="bg-card rounded-lg p-4 border border-border text-center">
+                    <h3 class="text-xs text-muted mb-2">Win Rate</h3>
+                    <div class="text-xl font-bold" id="win-rate">0%</div>
+                </div>
+                <div class="bg-card rounded-lg p-4 border border-border text-center">
+                    <h3 class="text-xs text-muted mb-2">Total PnL</h3>
+                    <div class="text-xl font-bold" id="total-pnl">+0.00 USDT</div>
+                </div>
+                <div class="bg-card rounded-lg p-4 border border-border text-center">
+                    <h3 class="text-xs text-muted mb-2">Avg PnL</h3>
+                    <div class="text-xl font-bold" id="avg-pnl">+0.00 USDT</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Advisor Decisions -->
+        <section class="mb-8">
+            <h2 class="text-lg font-semibold text-muted mb-4">OpenClaw AI Advisor Decisions</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full bg-card rounded-lg overflow-hidden text-sm">
                     <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Direction</th>
-                            <th>Entry Price</th>
-                            <th>Decision</th>
-                            <th>Reason</th>
-                            <th>Executed</th>
-                            <th>Response Time</th>
+                        <tr class="bg-border text-muted text-xs">
+                            <th class="p-3 text-left">Time</th>
+                            <th class="p-3 text-left">Direction</th>
+                            <th class="p-3 text-left">Entry Price</th>
+                            <th class="p-3 text-left">Advisor SL</th>
+                            <th class="p-3 text-left">Advisor TP</th>
+                            <th class="p-3 text-left">Decision</th>
+                            <th class="p-3 text-left">Executed</th>
+                            <th class="p-3 text-left">Response Time</th>
                         </tr>
                     </thead>
                     <tbody id="advisor-body">
-                        <tr><td colspan="7" style="text-align: center; color: #666;">No advisor decisions yet</td></tr>
+                        <tr><td colspan="8" class="p-4 text-center text-gray-500">No advisor decisions yet</td></tr>
                     </tbody>
                 </table>
-                <div class="pagination" id="advisor-pagination">
-                    <button id="advisor-prev" onclick="changeAdvisorPage(-1)">Prev</button>
-                    <span class="page-info" id="advisor-page-info">Page 1 of 1</span>
-                    <button id="advisor-next" onclick="changeAdvisorPage(1)">Next</button>
-                </div>
             </div>
-        </div>
+            <div class="flex items-center justify-center gap-3 mt-3">
+                <button id="advisor-prev" onclick="changeAdvisorPage(-1)" class="px-4 py-1.5 bg-border text-gray-200 border border-border-hover rounded-md text-sm hover:bg-border-hover disabled:opacity-40 disabled:cursor-default">Prev</button>
+                <span id="advisor-page-info" class="text-sm text-muted">Page 1 of 1</span>
+                <button id="advisor-next" onclick="changeAdvisorPage(1)" class="px-4 py-1.5 bg-border text-gray-200 border border-border-hover rounded-md text-sm hover:bg-border-hover disabled:opacity-40 disabled:cursor-default">Next</button>
+            </div>
+        </section>
 
-        <div class="trades-section">
-            <h2>Recent Trades</h2>
-            <div style="overflow-x: auto;">
-                <table class="trades-table" id="trades-table">
+        <!-- Recent Trades -->
+        <section class="mb-8">
+            <h2 class="text-lg font-semibold text-muted mb-4">Recent Trades</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full bg-card rounded-lg overflow-hidden text-sm">
                     <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Direction</th>
-                            <th>Entry</th>
-                            <th>Exit</th>
-                            <th>PnL</th>
-                            <th>PnL %</th>
-                            <th>Status</th>
+                        <tr class="bg-border text-muted text-xs">
+                            <th class="p-3 text-left">Time</th>
+                            <th class="p-3 text-left">Direction</th>
+                            <th class="p-3 text-left">Entry</th>
+                            <th class="p-3 text-left">Exit</th>
+                            <th class="p-3 text-left">PnL</th>
+                            <th class="p-3 text-left">PnL %</th>
+                            <th class="p-3 text-left">Status</th>
                         </tr>
                     </thead>
                     <tbody id="trades-body">
-                        <tr><td colspan="7" style="text-align: center; color: #666;">No trades yet</td></tr>
+                        <tr><td colspan="7" class="p-4 text-center text-gray-500">No trades yet</td></tr>
                     </tbody>
                 </table>
-                <div class="pagination" id="trades-pagination">
-                    <button id="trades-prev" onclick="changeTradesPage(-1)">Prev</button>
-                    <span class="page-info" id="trades-page-info">Page 1 of 1</span>
-                    <button id="trades-next" onclick="changeTradesPage(1)">Next</button>
-                </div>
             </div>
-        </div>
+            <div class="flex items-center justify-center gap-3 mt-3">
+                <button id="trades-prev" onclick="changeTradesPage(-1)" class="px-4 py-1.5 bg-border text-gray-200 border border-border-hover rounded-md text-sm hover:bg-border-hover disabled:opacity-40 disabled:cursor-default">Prev</button>
+                <span id="trades-page-info" class="text-sm text-muted">Page 1 of 1</span>
+                <button id="trades-next" onclick="changeTradesPage(1)" class="px-4 py-1.5 bg-border text-gray-200 border border-border-hover rounded-md text-sm hover:bg-border-hover disabled:opacity-40 disabled:cursor-default">Next</button>
+            </div>
+        </section>
 
-        <div class="logs">
-            <h2>Recent Activity</h2>
-            <div class="log-container" id="logs">
+        <!-- Logs -->
+        <section class="bg-card rounded-xl p-5 border border-border">
+            <h2 class="text-lg font-semibold text-muted mb-4">Recent Activity</h2>
+            <div id="logs" class="bg-terminal rounded-md p-4 max-h-96 overflow-y-auto font-mono text-xs leading-relaxed">
                 <div class="log-line">Loading logs...</div>
             </div>
+        </section>
+    </div>
+
+    <!-- Advisor Detail Modal -->
+    <div id="advisor-modal" class="hidden fixed inset-0 bg-black/70 z-50 items-center justify-center" onclick="closeModal(event)">
+        <div class="bg-card border border-border rounded-xl p-6 max-w-lg w-[90%] max-h-[80vh] overflow-y-auto relative">
+            <button class="absolute top-3 right-4 text-muted hover:text-white text-2xl" onclick="document.getElementById('advisor-modal').classList.add('hidden');document.getElementById('advisor-modal').classList.remove('flex')">&times;</button>
+            <h3 class="text-muted font-semibold mb-4">Advisor Decision</h3>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Time</span><span class="font-bold text-sm" id="modal-time"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Direction</span><span class="font-bold text-sm" id="modal-direction"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Entry Price</span><span class="font-bold text-sm" id="modal-entry"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Bot SL / TP</span><span class="font-bold text-sm" id="modal-bot-sltp"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Advisor SL</span><span class="font-bold text-sm text-red-500" id="modal-advisor-sl"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Advisor TP</span><span class="font-bold text-sm text-green-500" id="modal-advisor-tp"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Decision</span><span class="font-bold text-sm" id="modal-decision"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Executed</span><span class="font-bold text-sm" id="modal-executed"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Response Time</span><span class="font-bold text-sm" id="modal-response"></span></div>
+            <p class="text-muted text-sm mt-4 mb-2">Reason</p>
+            <div id="modal-reason" class="bg-terminal rounded-lg p-4 text-sm leading-relaxed whitespace-pre-wrap"></div>
         </div>
     </div>
 
     <script>
-        // Balance visibility state (default to hidden for privacy)
         let balanceVisible = localStorage.getItem('balanceVisible') === 'true';
         let actualBalance = 0;
-
-        // Pagination state
+        let advisorDecisionsCache = [];
         const PAGE_SIZE = 10;
-        let tradesPage = 1;
-        let tradesTotalPages = 1;
-        let advisorPage = 1;
-        let advisorTotalPages = 1;
+        let tradesPage = 1, tradesTotalPages = 1;
+        let advisorPage = 1, advisorTotalPages = 1;
 
-        // Toggle balance visibility
         function toggleBalance() {
             balanceVisible = !balanceVisible;
             localStorage.setItem('balanceVisible', balanceVisible);
             updateBalanceDisplay();
-
-            const toggleBtn = document.getElementById('balance-toggle');
-            toggleBtn.textContent = balanceVisible ? '👁️' : '🔒';
-            toggleBtn.title = balanceVisible ? 'Hide Balance' : 'Show Balance';
+            const btn = document.getElementById('balance-toggle');
+            btn.textContent = balanceVisible ? '👁️' : '🔒';
+            btn.title = balanceVisible ? 'Hide Balance' : 'Show Balance';
         }
-
         function updateBalanceDisplay() {
-            const balanceEl = document.getElementById('balance');
-            if (balanceVisible) {
-                balanceEl.textContent = actualBalance.toFixed(2) + ' USDT';
-            } else {
-                balanceEl.textContent = '•••.•• USDT';
-            }
+            const el = document.getElementById('balance');
+            el.textContent = balanceVisible ? actualBalance.toFixed(2) + ' USDT' : '•••.•• USDT';
         }
-
-        // Set initial icon state
         document.addEventListener('DOMContentLoaded', () => {
-            const toggleBtn = document.getElementById('balance-toggle');
-            toggleBtn.textContent = balanceVisible ? '👁️' : '🔒';
-            toggleBtn.title = balanceVisible ? 'Hide Balance' : 'Show Balance';
-            toggleBtn.addEventListener('click', toggleBalance);
+            const btn = document.getElementById('balance-toggle');
+            btn.textContent = balanceVisible ? '👁️' : '🔒';
+            btn.title = balanceVisible ? 'Hide Balance' : 'Show Balance';
+            btn.addEventListener('click', toggleBalance);
         });
 
-        function changeTradesPage(delta) {
-            const newPage = tradesPage + delta;
-            if (newPage < 1 || newPage > tradesTotalPages) return;
-            tradesPage = newPage;
-            fetchTrades();
-        }
-
-        function changeAdvisorPage(delta) {
-            const newPage = advisorPage + delta;
-            if (newPage < 1 || newPage > advisorTotalPages) return;
-            advisorPage = newPage;
-            fetchAdvisorDecisions();
-        }
-
+        function changeTradesPage(d) { const p = tradesPage + d; if (p >= 1 && p <= tradesTotalPages) { tradesPage = p; fetchTrades(); } }
+        function changeAdvisorPage(d) { const p = advisorPage + d; if (p >= 1 && p <= advisorTotalPages) { advisorPage = p; fetchAdvisorDecisions(); } }
         function updateTradesPagination() {
             document.getElementById('trades-page-info').textContent = `Page ${tradesPage} of ${tradesTotalPages}`;
             document.getElementById('trades-prev').disabled = tradesPage <= 1;
             document.getElementById('trades-next').disabled = tradesPage >= tradesTotalPages;
         }
-
         function updateAdvisorPagination() {
             document.getElementById('advisor-page-info').textContent = `Page ${advisorPage} of ${advisorTotalPages}`;
             document.getElementById('advisor-prev').disabled = advisorPage <= 1;
@@ -508,35 +222,30 @@
                     tradesTotalPages = Math.max(1, Math.ceil((data.total || 0) / PAGE_SIZE));
                     if (tradesPage > tradesTotalPages) tradesPage = tradesTotalPages;
                     updateTradesPagination();
-
                     const tbody = document.getElementById('trades-body');
                     if (data.trades && data.trades.length > 0) {
                         tbody.innerHTML = data.trades.map(trade => {
-                            const entryTime = new Date(trade.entry_time).toLocaleString('en-US', {
-                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                            });
-                            const exitPrice = trade.exit_price ? trade.exit_price.toFixed(1) : '-';
+                            const t = new Date(trade.entry_time).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+                            const ep = trade.exit_price ? trade.exit_price.toFixed(1) : '-';
                             const pnl = trade.pnl !== null ? trade.pnl.toFixed(2) : '-';
-                            const pnlPct = trade.pnl_percentage !== null ? trade.pnl_percentage.toFixed(2) + '%' : '-';
-                            const pnlClass = trade.pnl !== null ? (trade.pnl >= 0 ? 'pnl-positive' : 'pnl-negative') : '';
-
-                            return `
-                                <tr>
-                                    <td>${entryTime}</td>
-                                    <td><span class="trade-direction ${trade.direction}">${trade.direction}</span></td>
-                                    <td>${trade.entry_price.toFixed(1)}</td>
-                                    <td>${exitPrice}</td>
-                                    <td class="${pnlClass}">${pnl !== '-' ? (trade.pnl >= 0 ? '+' : '') + pnl : '-'}</td>
-                                    <td class="${pnlClass}">${pnlPct !== '-' ? (trade.pnl_percentage >= 0 ? '+' : '') + pnlPct : '-'}</td>
-                                    <td><span class="trade-status ${trade.status}">${trade.status.toUpperCase()}</span></td>
-                                </tr>
-                            `;
+                            const pp = trade.pnl_percentage !== null ? trade.pnl_percentage.toFixed(2) + '%' : '-';
+                            const pc = trade.pnl !== null ? (trade.pnl >= 0 ? 'text-green-500' : 'text-red-500') : '';
+                            const dc = trade.direction === 'LONG' ? 'bg-green-900 text-green-500' : 'bg-red-900 text-red-500';
+                            const sc = trade.status === 'open' ? 'bg-blue-800 text-blue-400' : 'bg-gray-700 text-gray-400';
+                            return `<tr class="hover:bg-[#252a45] border-t border-border">
+                                <td class="p-3">${t}</td>
+                                <td class="p-3"><span class="px-2 py-0.5 rounded text-xs font-bold ${dc}">${trade.direction}</span></td>
+                                <td class="p-3">${trade.entry_price.toFixed(1)}</td>
+                                <td class="p-3">${ep}</td>
+                                <td class="p-3 ${pc}">${pnl !== '-' ? (trade.pnl >= 0 ? '+' : '') + pnl : '-'}</td>
+                                <td class="p-3 ${pc}">${pp !== '-' ? (trade.pnl_percentage >= 0 ? '+' : '') + pp : '-'}</td>
+                                <td class="p-3"><span class="px-2 py-0.5 rounded text-xs ${sc}">${trade.status.toUpperCase()}</span></td>
+                            </tr>`;
                         }).join('');
                     } else {
-                        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No trades yet</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="7" class="p-4 text-center text-gray-500">No trades yet</td></tr>';
                     }
-                })
-                .catch(err => console.error('Error fetching trades:', err));
+                }).catch(err => console.error('Error fetching trades:', err));
         }
 
         function fetchAdvisorDecisions() {
@@ -547,115 +256,108 @@
                     advisorTotalPages = Math.max(1, Math.ceil((data.total || 0) / PAGE_SIZE));
                     if (advisorPage > advisorTotalPages) advisorPage = advisorTotalPages;
                     updateAdvisorPagination();
-
                     const tbody = document.getElementById('advisor-body');
                     if (data.decisions && data.decisions.length > 0) {
-                        tbody.innerHTML = data.decisions.map(decision => {
-                            const timestamp = new Date(decision.timestamp).toLocaleString('en-US', {
-                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                            });
-                            const approved = decision.approved;
-                            const executed = decision.trade_executed;
-                            const decisionClass = approved ? 'pnl-positive' : 'pnl-negative';
-                            const decisionText = approved ? '✅ APPROVED' : '❌ REJECTED';
-                            const executedBadge = executed ?
-                                '<span class="trade-status open">✓ YES</span>' :
-                                '<span class="trade-status closed">NO</span>';
-                            const responseTime = decision.response_time_ms ? decision.response_time_ms + 'ms' : '-';
-
-                            return `
-                                <tr>
-                                    <td>${timestamp}</td>
-                                    <td><span class="trade-direction ${decision.direction}">${decision.direction}</span></td>
-                                    <td>${decision.entry_price.toFixed(1)}</td>
-                                    <td class="${decisionClass}">${decisionText}</td>
-                                    <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(decision.advisor_reason || '-')}">${escapeHtml(decision.advisor_reason || '-')}</td>
-                                    <td>${executedBadge}</td>
-                                    <td>${responseTime}</td>
-                                </tr>
-                            `;
+                        advisorDecisionsCache = data.decisions;
+                        tbody.innerHTML = data.decisions.map((d, idx) => {
+                            const ts = new Date(d.timestamp).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+                            const dc = d.direction === 'LONG' ? 'bg-green-900 text-green-500' : 'bg-red-900 text-red-500';
+                            const dec = d.approved ? '<span class="text-green-500">APPROVED</span>' : '<span class="text-red-500">REJECTED</span>';
+                            const exec = d.trade_executed ? '<span class="px-2 py-0.5 rounded text-xs bg-blue-800 text-blue-400">YES</span>' : '<span class="px-2 py-0.5 rounded text-xs bg-gray-700 text-gray-400">NO</span>';
+                            const rt = d.response_time_ms ? d.response_time_ms + 'ms' : '-';
+                            return `<tr class="hover:bg-[#252a45] border-t border-border cursor-pointer" onclick="showAdvisorDetail(${idx})">
+                                <td class="p-3">${ts}</td>
+                                <td class="p-3"><span class="px-2 py-0.5 rounded text-xs font-bold ${dc}">${d.direction}</span></td>
+                                <td class="p-3">${d.entry_price.toFixed(1)}</td>
+                                <td class="p-3 text-red-500">${d.advisor_sl ? d.advisor_sl.toFixed(1) : '-'}</td>
+                                <td class="p-3 text-green-500">${d.advisor_tp ? d.advisor_tp.toFixed(1) : '-'}</td>
+                                <td class="p-3">${dec}</td>
+                                <td class="p-3">${exec}</td>
+                                <td class="p-3">${rt}</td>
+                            </tr>`;
                         }).join('');
                     } else {
-                        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No advisor decisions yet</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-gray-500">No advisor decisions yet</td></tr>';
                     }
-                })
-                .catch(err => console.error('Error fetching advisor decisions:', err));
+                }).catch(err => console.error('Error fetching advisor decisions:', err));
         }
 
-        // Update dashboard — auto-refreshes tables only when on page 1
         function updateDashboard() {
-            fetch('/api/status')
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('status').textContent = data.status || 'Running';
+            fetch('/api/status').then(r => r.json()).then(data => {
+                document.getElementById('status').textContent = data.status || 'Running';
+                actualBalance = data.balance || 0;
+                updateBalanceDisplay();
+                document.getElementById('position').textContent = data.position || 'None';
+                const pnlEl = document.getElementById('position-pnl');
+                if (data.position_pnl) {
+                    pnlEl.textContent = data.position_pnl;
+                    pnlEl.style.color = data.position_pnl.includes('+') ? '#00c853' : '#ff1744';
+                } else { pnlEl.textContent = ''; }
+                const modeEl = document.getElementById('mode');
+                modeEl.textContent = data.mode;
+                modeEl.className = data.mode === 'LIVE'
+                    ? 'inline-block px-4 py-1 rounded-full text-sm font-bold bg-red-600 text-white'
+                    : 'inline-block px-4 py-1 rounded-full text-sm font-bold bg-blue-600 text-white';
+                if (data.last_update) {
+                    document.getElementById('last-update').textContent = 'Last update: ' + new Date(data.last_update).toLocaleTimeString();
+                }
+            }).catch(err => console.error('Error fetching status:', err));
 
-                    actualBalance = data.balance || 0;
-                    updateBalanceDisplay();
+            fetch('/api/logs').then(r => r.json()).then(data => {
+                const el = document.getElementById('logs');
+                if (data.logs && data.logs.length > 0) {
+                    el.innerHTML = data.logs.map(line => {
+                        let cls = 'log-line';
+                        if (line.includes('[ERROR]')) cls += ' error';
+                        else if (line.includes('[WARNING]')) cls += ' warning';
+                        else if (line.includes('[INFO]')) cls += ' info';
+                        return `<div class="${cls}">${escapeHtml(line)}</div>`;
+                    }).join('');
+                    el.scrollTop = el.scrollHeight;
+                }
+            }).catch(err => console.error('Error fetching logs:', err));
 
-                    document.getElementById('position').textContent = data.position || 'None';
+            fetch('/api/trades/statistics').then(r => r.json()).then(data => {
+                document.getElementById('total-trades').textContent = data.total_trades || 0;
+                document.getElementById('win-rate').textContent = (data.win_rate || 0).toFixed(1) + '%';
+                const tp = data.total_pnl || 0;
+                const tpEl = document.getElementById('total-pnl');
+                tpEl.textContent = (tp >= 0 ? '+' : '') + tp.toFixed(2) + ' USDT';
+                tpEl.className = 'text-xl font-bold ' + (tp >= 0 ? 'text-green-500' : 'text-red-500');
+                const ap = data.avg_pnl || 0;
+                const apEl = document.getElementById('avg-pnl');
+                apEl.textContent = (ap >= 0 ? '+' : '') + ap.toFixed(2) + ' USDT';
+                apEl.className = 'text-xl font-bold ' + (ap >= 0 ? 'text-green-500' : 'text-red-500');
+            }).catch(err => console.error('Error fetching statistics:', err));
 
-                    const pnlEl = document.getElementById('position-pnl');
-                    if (data.position_pnl) {
-                        pnlEl.textContent = data.position_pnl;
-                        pnlEl.style.color = data.position_pnl.includes('+') ? '#00c853' : '#ff1744';
-                    } else {
-                        pnlEl.textContent = '';
-                    }
-
-                    const modeEl = document.getElementById('mode');
-                    modeEl.textContent = data.mode;
-                    modeEl.className = 'mode ' + (data.mode === 'LIVE' ? 'live' : 'dry-run');
-
-                    if (data.last_update) {
-                        const date = new Date(data.last_update);
-                        document.getElementById('last-update').textContent =
-                            'Last update: ' + date.toLocaleTimeString();
-                    }
-                })
-                .catch(err => console.error('Error fetching status:', err));
-
-            fetch('/api/logs')
-                .then(r => r.json())
-                .then(data => {
-                    const logsEl = document.getElementById('logs');
-                    if (data.logs && data.logs.length > 0) {
-                        logsEl.innerHTML = data.logs
-                            .map(line => {
-                                let className = 'log-line';
-                                if (line.includes('[ERROR]')) className += ' error';
-                                else if (line.includes('[WARNING]')) className += ' warning';
-                                else if (line.includes('[INFO]')) className += ' info';
-
-                                return `<div class="${className}">${escapeHtml(line)}</div>`;
-                            })
-                            .join('');
-
-                        logsEl.scrollTop = logsEl.scrollHeight;
-                    }
-                })
-                .catch(err => console.error('Error fetching logs:', err));
-
-            fetch('/api/trades/statistics')
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('total-trades').textContent = data.total_trades || 0;
-                    document.getElementById('win-rate').textContent = (data.win_rate || 0).toFixed(1) + '%';
-
-                    const totalPnl = data.total_pnl || 0;
-                    const totalPnlEl = document.getElementById('total-pnl');
-                    totalPnlEl.textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + ' USDT';
-                    totalPnlEl.className = 'value ' + (totalPnl >= 0 ? 'positive' : 'negative');
-
-                    const avgPnl = data.avg_pnl || 0;
-                    const avgPnlEl = document.getElementById('avg-pnl');
-                    avgPnlEl.textContent = (avgPnl >= 0 ? '+' : '') + avgPnl.toFixed(2) + ' USDT';
-                    avgPnlEl.className = 'value ' + (avgPnl >= 0 ? 'positive' : 'negative');
-                })
-                .catch(err => console.error('Error fetching statistics:', err));
-
-            // Only auto-refresh tables when on page 1
             if (tradesPage === 1) fetchTrades();
             if (advisorPage === 1) fetchAdvisorDecisions();
+        }
+
+        function showAdvisorDetail(idx) {
+            const d = advisorDecisionsCache[idx];
+            if (!d) return;
+            const ts = new Date(d.timestamp).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+            document.getElementById('modal-time').textContent = ts;
+            document.getElementById('modal-direction').textContent = d.direction;
+            document.getElementById('modal-entry').textContent = d.entry_price.toFixed(1);
+            document.getElementById('modal-bot-sltp').textContent = d.stop_loss.toFixed(1) + ' / ' + d.take_profit.toFixed(1);
+            document.getElementById('modal-advisor-sl').textContent = d.advisor_sl ? d.advisor_sl.toFixed(1) : '-';
+            document.getElementById('modal-advisor-tp').textContent = d.advisor_tp ? d.advisor_tp.toFixed(1) : '-';
+            document.getElementById('modal-decision').textContent = d.approved ? 'APPROVED' : 'REJECTED';
+            document.getElementById('modal-executed').textContent = d.trade_executed ? 'Yes' : 'No';
+            document.getElementById('modal-response').textContent = d.response_time_ms ? d.response_time_ms + 'ms' : '-';
+            document.getElementById('modal-reason').textContent = d.advisor_reason || '-';
+            const modal = document.getElementById('advisor-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeModal(event) {
+            if (event.target === event.currentTarget) {
+                event.target.classList.add('hidden');
+                event.target.classList.remove('flex');
+            }
         }
 
         function escapeHtml(text) {
@@ -664,11 +366,8 @@
             return div.innerHTML;
         }
 
-        // Initial fetch for both tables
         fetchTrades();
         fetchAdvisorDecisions();
-
-        // Initial update + auto-refresh every 2 seconds
         updateDashboard();
         setInterval(updateDashboard, 2000);
     </script>

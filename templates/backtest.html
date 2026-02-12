@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backtest | SimiLancao OpenClaw Trader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        base: '#0a0e27',
+                        card: '#1a1f3a',
+                        border: '#2a3152',
+                        'border-hover': '#3a4172',
+                        muted: '#8b9dc3',
+                        terminal: '#0f1419',
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner { display:inline-block; width:18px; height:18px; border:2px solid rgba(255,255,255,0.3); border-radius:50%; border-top-color:#fff; animation:spin .8s linear infinite; vertical-align:middle; margin-right:8px; }
+    </style>
+</head>
+<body class="bg-base text-gray-200 font-sans p-3 sm:p-5">
+    <div class="max-w-[1400px] mx-auto">
+
+        <!-- Header -->
+        <header class="text-center py-5 border-b-2 border-border mb-8">
+            <a href="/" class="text-muted hover:text-white text-sm transition-colors">&larr; Back to Dashboard</a>
+            <h1 class="text-2xl sm:text-3xl font-bold mt-2">Backtest</h1>
+        </header>
+
+        <!-- Controls -->
+        <div class="flex items-center justify-center gap-4 mb-5 flex-wrap">
+            <select id="period-select" class="bg-card text-gray-200 border border-border rounded-lg px-5 py-2.5 text-sm cursor-pointer hover:border-border-hover focus:outline-none">
+                <option value="3">3 days (288 candles)</option>
+                <option value="7" selected>7 days (672 candles)</option>
+                <option value="10">10 days (960 candles)</option>
+            </select>
+            <button id="btn-run" onclick="runBacktest()" class="bg-blue-700 hover:bg-blue-600 text-white font-bold px-6 py-2.5 rounded-lg text-sm border border-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                Run Backtest
+            </button>
+        </div>
+
+        <!-- Chart -->
+        <div id="chart-container" class="bg-card rounded-xl border border-border p-2.5 mb-5 min-h-[450px] relative">
+            <div id="chart-placeholder" class="flex items-center justify-center h-[430px] text-gray-500 text-base">
+                Click "Run Backtest" to load chart
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div id="stats-grid" class="hidden grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4 mb-5">
+            <div class="bg-card rounded-lg p-4 border border-border text-center">
+                <h3 class="text-xs text-muted mb-2">Total Trades</h3>
+                <div class="text-xl font-bold" id="st-total">0</div>
+            </div>
+            <div class="bg-card rounded-lg p-4 border border-border text-center">
+                <h3 class="text-xs text-muted mb-2">Wins</h3>
+                <div class="text-xl font-bold text-green-500" id="st-wins">0</div>
+            </div>
+            <div class="bg-card rounded-lg p-4 border border-border text-center">
+                <h3 class="text-xs text-muted mb-2">Losses</h3>
+                <div class="text-xl font-bold text-red-500" id="st-losses">0</div>
+            </div>
+            <div class="bg-card rounded-lg p-4 border border-border text-center">
+                <h3 class="text-xs text-muted mb-2">Still Open</h3>
+                <div class="text-xl font-bold" id="st-open">0</div>
+            </div>
+            <div class="bg-card rounded-lg p-4 border border-border text-center">
+                <h3 class="text-xs text-muted mb-2">Win Rate</h3>
+                <div class="text-xl font-bold" id="st-winrate">0%</div>
+            </div>
+            <div class="bg-card rounded-lg p-4 border border-border text-center">
+                <h3 class="text-xs text-muted mb-2">Total PnL</h3>
+                <div class="text-xl font-bold" id="st-pnl">0.00</div>
+            </div>
+            <div class="bg-card rounded-lg p-4 border border-border text-center">
+                <h3 class="text-xs text-muted mb-2">Avg PnL</h3>
+                <div class="text-xl font-bold" id="st-avgpnl">0.00</div>
+            </div>
+        </div>
+
+        <!-- Trades Table -->
+        <section id="trades-section" class="hidden mt-5">
+            <h2 class="text-lg font-semibold text-muted mb-4">Backtest Trades</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full bg-card rounded-lg overflow-hidden text-sm">
+                    <thead>
+                        <tr class="bg-border text-muted text-xs">
+                            <th class="p-3 text-left">#</th>
+                            <th class="p-3 text-left">Entry Time</th>
+                            <th class="p-3 text-left">Direction</th>
+                            <th class="p-3 text-left">Entry</th>
+                            <th class="p-3 text-left">SL</th>
+                            <th class="p-3 text-left">TP</th>
+                            <th class="p-3 text-left">Exit</th>
+                            <th class="p-3 text-left">Result</th>
+                            <th class="p-3 text-left">PnL</th>
+                            <th class="p-3 text-left">Confidence</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trades-body"></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- Trade Detail Modal -->
+    <div id="trade-modal" class="hidden fixed inset-0 bg-black/70 z-50 items-center justify-center" onclick="if(event.target===this){this.classList.add('hidden');this.classList.remove('flex')}">
+        <div class="bg-card border border-border rounded-xl p-6 max-w-lg w-[90%] max-h-[80vh] overflow-y-auto relative">
+            <button class="absolute top-3 right-4 text-muted hover:text-white text-2xl" onclick="document.getElementById('trade-modal').classList.add('hidden');document.getElementById('trade-modal').classList.remove('flex')">&times;</button>
+            <h3 class="text-muted font-semibold mb-4">Trade Details</h3>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Direction</span><span class="font-bold text-sm" id="md-direction"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Entry Time</span><span class="font-bold text-sm" id="md-entry-time"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Entry Price</span><span class="font-bold text-sm" id="md-entry-price"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Stop Loss</span><span class="font-bold text-sm text-red-500" id="md-sl"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Take Profit</span><span class="font-bold text-sm text-green-500" id="md-tp"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Exit Time</span><span class="font-bold text-sm" id="md-exit-time"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Exit Price</span><span class="font-bold text-sm" id="md-exit-price"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Result</span><span class="font-bold text-sm" id="md-result"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">PnL</span><span class="font-bold text-sm" id="md-pnl"></span></div>
+            <div class="flex justify-between py-2 border-b border-border"><span class="text-muted text-sm">Confidence</span><span class="font-bold text-sm" id="md-confidence"></span></div>
+            <p class="text-muted text-sm mt-4 mb-2">Signal Reason</p>
+            <div id="md-reason" class="bg-terminal rounded-lg p-4 text-sm leading-relaxed whitespace-pre-wrap"></div>
+        </div>
+    </div>
+
+    <script>
+        let chart = null;
+        let candleSeries = null;
+        let tradesCache = [];
+
+        function runBacktest() {
+            const btn = document.getElementById('btn-run');
+            const days = parseInt(document.getElementById('period-select').value);
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>Running...';
+            document.getElementById('chart-placeholder')?.remove();
+
+            fetch('/api/backtest/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({days})
+            })
+            .then(r => { if (!r.ok) throw new Error('Backtest failed: ' + r.status); return r.json(); })
+            .then(data => {
+                renderChart(data.candles, data.trades);
+                renderStats(data.summary);
+                renderTradesTable(data.trades);
+                tradesCache = data.trades;
+            })
+            .catch(err => { alert('Error: ' + err.message); console.error(err); })
+            .finally(() => { btn.disabled = false; btn.innerHTML = 'Run Backtest'; });
+        }
+
+        function renderChart(candles, trades) {
+            const container = document.getElementById('chart-container');
+            if (chart) { chart.remove(); chart = null; }
+
+            chart = LightweightCharts.createChart(container, {
+                width: container.clientWidth - 20,
+                height: 450,
+                layout: { background: { color: '#1a1f3a' }, textColor: '#8b9dc3' },
+                grid: { vertLines: { color: '#2a3152' }, horzLines: { color: '#2a3152' } },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                timeScale: { borderColor: '#2a3152', timeVisible: true, secondsVisible: false },
+                rightPriceScale: { borderColor: '#2a3152' },
+            });
+
+            // v5: addSeries(Type, opts), v3: addCandlestickSeries(opts)
+            const csOpts = {
+                upColor: '#4caf50', downColor: '#f44336',
+                borderUpColor: '#4caf50', borderDownColor: '#f44336',
+                wickUpColor: '#4caf50', wickDownColor: '#f44336',
+            };
+            if (typeof chart.addCandlestickSeries === 'function') {
+                candleSeries = chart.addCandlestickSeries(csOpts);
+            } else {
+                candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, csOpts);
+            }
+            candleSeries.setData(candles);
+
+            const markers = [];
+            trades.forEach((t, idx) => {
+                markers.push({
+                    time: candles[t.entry_idx]?.time || 0,
+                    position: t.direction === 'LONG' ? 'belowBar' : 'aboveBar',
+                    color: t.direction === 'LONG' ? '#4caf50' : '#f44336',
+                    shape: t.direction === 'LONG' ? 'arrowUp' : 'arrowDown',
+                    text: t.direction + ' #' + (idx + 1),
+                });
+                if (t.exit_idx != null && t.exit_type) {
+                    markers.push({
+                        time: candles[t.exit_idx]?.time || 0,
+                        position: t.exit_type === 'TP' ? 'aboveBar' : 'belowBar',
+                        color: t.exit_type === 'TP' ? '#4caf50' : '#f44336',
+                        shape: 'circle',
+                        text: t.exit_type + ' #' + (idx + 1),
+                    });
+                }
+            });
+            markers.sort((a, b) => a.time - b.time);
+            // v5: createSeriesMarkers, v4: series.setMarkers
+            if (typeof LightweightCharts.createSeriesMarkers === 'function') {
+                LightweightCharts.createSeriesMarkers(candleSeries, markers);
+            } else {
+                candleSeries.setMarkers(markers);
+            }
+
+            new ResizeObserver(() => { chart.applyOptions({ width: container.clientWidth - 20 }); }).observe(container);
+            chart.timeScale().fitContent();
+        }
+
+        function renderStats(s) {
+            const grid = document.getElementById('stats-grid');
+            grid.classList.remove('hidden');
+
+            document.getElementById('st-total').textContent = s.total_trades;
+            document.getElementById('st-wins').textContent = s.wins;
+            document.getElementById('st-losses').textContent = s.losses;
+            document.getElementById('st-open').textContent = s.open;
+
+            const wr = document.getElementById('st-winrate');
+            wr.textContent = s.win_rate.toFixed(1) + '%';
+            wr.className = 'text-xl font-bold ' + (s.win_rate >= 50 ? 'text-green-500' : s.win_rate > 0 ? 'text-red-500' : '');
+
+            const pnl = document.getElementById('st-pnl');
+            pnl.textContent = (s.total_pnl >= 0 ? '+' : '') + s.total_pnl.toFixed(2) + ' USDT';
+            pnl.className = 'text-xl font-bold ' + (s.total_pnl >= 0 ? 'text-green-500' : 'text-red-500');
+
+            const avg = document.getElementById('st-avgpnl');
+            avg.textContent = (s.avg_pnl >= 0 ? '+' : '') + s.avg_pnl.toFixed(2) + ' USDT';
+            avg.className = 'text-xl font-bold ' + (s.avg_pnl >= 0 ? 'text-green-500' : 'text-red-500');
+        }
+
+        function renderTradesTable(trades) {
+            document.getElementById('trades-section').classList.remove('hidden');
+            const tbody = document.getElementById('trades-body');
+            if (!trades.length) {
+                tbody.innerHTML = '<tr><td colspan="10" class="p-4 text-center text-gray-500">No signals generated</td></tr>';
+                return;
+            }
+            tbody.innerHTML = trades.map((t, idx) => {
+                const et = new Date(t.entry_time).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+                const ep = t.exit_price != null ? t.exit_price.toFixed(1) : '-';
+                const dc = t.direction === 'LONG' ? 'bg-green-900 text-green-500' : 'bg-red-900 text-red-500';
+                const rc = t.exit_type === 'TP' ? 'bg-green-900 text-green-500' : t.exit_type === 'SL' ? 'bg-red-900 text-red-500' : 'bg-blue-800 text-blue-400';
+                const rl = t.exit_type || 'OPEN';
+                const pnl = t.pnl != null ? (t.pnl >= 0 ? '+' : '') + t.pnl.toFixed(2) : '-';
+                const pc = t.pnl != null ? (t.pnl >= 0 ? 'text-green-500' : 'text-red-500') : '';
+                return `<tr class="hover:bg-[#252a45] border-t border-border cursor-pointer" onclick="showTradeDetail(${idx})">
+                    <td class="p-3">${idx+1}</td>
+                    <td class="p-3">${et}</td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded text-xs font-bold ${dc}">${t.direction}</span></td>
+                    <td class="p-3">${t.entry_price.toFixed(1)}</td>
+                    <td class="p-3 text-red-500">${t.stop_loss.toFixed(1)}</td>
+                    <td class="p-3 text-green-500">${t.take_profit.toFixed(1)}</td>
+                    <td class="p-3">${ep}</td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded text-xs font-bold ${rc}">${rl}</span></td>
+                    <td class="p-3 ${pc}">${pnl}</td>
+                    <td class="p-3">${(t.confidence*100).toFixed(0)}%</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function showTradeDetail(idx) {
+            const t = tradesCache[idx];
+            if (!t) return;
+            document.getElementById('md-direction').textContent = t.direction;
+            document.getElementById('md-entry-time').textContent = t.entry_time;
+            document.getElementById('md-entry-price').textContent = t.entry_price.toFixed(1);
+            document.getElementById('md-sl').textContent = t.stop_loss.toFixed(1);
+            document.getElementById('md-tp').textContent = t.take_profit.toFixed(1);
+            document.getElementById('md-exit-time').textContent = t.exit_time || '-';
+            document.getElementById('md-exit-price').textContent = t.exit_price != null ? t.exit_price.toFixed(1) : '-';
+            document.getElementById('md-result').textContent = t.exit_type || 'OPEN';
+            document.getElementById('md-pnl').textContent = t.pnl != null ? (t.pnl >= 0 ? '+' : '') + t.pnl.toFixed(2) + ' USDT' : '-';
+            document.getElementById('md-confidence').textContent = (t.confidence*100).toFixed(0) + '%';
+            document.getElementById('md-reason').textContent = t.reason.replace(/ \| /g, '\n');
+            const modal = document.getElementById('trade-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            if (chart && t.entry_idx != null) {
+                chart.timeScale().scrollToPosition(t.entry_idx - tradesCache.length, false);
+            }
+        }
+    </script>
+</body>
+</html>

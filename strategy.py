@@ -93,6 +93,47 @@ def detect_lower_highs(df: pd.DataFrame, lookback: int = 20) -> bool:
     return False
 
 
+def compute_signum_score(df: pd.DataFrame) -> int:
+    """Compute composite momentum score using np.sign across multiple indicators.
+
+    Score ranges from -5 (strongly bearish) to +5 (strongly bullish):
+      1. Price change direction:     sign(close - prev_close)
+      2. Fast MA vs Mid MA spread:   sign(ma7 - ma25)
+      3. Mid MA vs Slow MA spread:   sign(ma25 - ma99)
+      4. RSI relative to midline:    sign(rsi - 50)
+      5. Volume vs average:          sign(volume - vol_ma20)
+    """
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    s1 = int(np.sign(latest["close"] - prev["close"]))
+    s2 = int(np.sign(latest["ma7"] - latest["ma25"]))
+    s3 = int(np.sign(latest["ma25"] - latest["ma99"]))
+    s4 = int(np.sign(latest["rsi"] - 50)) if not pd.isna(latest["rsi"]) else 0
+    s5 = int(np.sign(latest["volume"] - latest["vol_ma20"]))
+
+    return s1 + s2 + s3 + s4 + s5
+
+
+def detect_signum_crossover(df: pd.DataFrame) -> Optional[str]:
+    """Detect MA crossover using np.sign diff — cleaner than bar-by-bar comparison.
+
+    np.sign(ma7 - ma25).diff() == +2 means bullish cross, -2 means bearish cross.
+    Returns "BULLISH", "BEARISH", or None.
+    """
+    if len(df) < 3:
+        return None
+    spread = df["ma7"] - df["ma25"]
+    signum = np.sign(spread)
+    diff = signum.diff()
+    last_diff = diff.iloc[-1]
+    if last_diff == 2:
+        return "BULLISH"
+    elif last_diff == -2:
+        return "BEARISH"
+    return None
+
+
 def find_nearest_support_resistance(price: float, swing_highs: List[float], swing_lows: List[float],
                                      threshold_pct: float = 0.01) -> Tuple[Optional[float], Optional[float]]:
     """Find nearest support (below price) and resistance (above price) from swing points."""
@@ -105,6 +146,66 @@ def find_nearest_support_resistance(price: float, swing_highs: List[float], swin
         elif level > price * (1 + 0.001) and resistance is None:  # above price
             resistance = level
     return support, resistance
+
+
+# ---------------------------------------------------------------------------
+# Daily timeframe analysis
+# ---------------------------------------------------------------------------
+
+def analyze_daily(df_daily: pd.DataFrame) -> dict:
+    """Analyze 1D klines for higher-timeframe context.
+
+    Args:
+        df_daily: DataFrame with daily OHLCV data (30-90 rows).
+
+    Returns dict with trend, MA values, RSI, support/resistance, and summary.
+    """
+    if len(df_daily) < 30:
+        return {"trend": "NEUTRAL", "daily_summary": "Insufficient daily data"}
+
+    df_daily = compute_mas(df_daily)
+    df_daily = compute_rsi(df_daily)
+    latest = df_daily.iloc[-1]
+    price = latest["close"]
+
+    # Trend from MA alignment
+    ma7 = latest["ma7"]
+    ma25 = latest["ma25"]
+    ma99 = latest["ma99"]
+    if pd.isna(ma99):
+        trend = "NEUTRAL"
+    elif ma7 > ma25 > ma99:
+        trend = "BULLISH"
+    elif ma7 < ma25 < ma99:
+        trend = "BEARISH"
+    else:
+        trend = "NEUTRAL"
+
+    rsi = latest["rsi"] if not pd.isna(latest["rsi"]) else 50.0
+
+    # Support / resistance from daily swing points
+    swing_highs, swing_lows = find_swing_points(df_daily, lookback=3)
+    support, resistance = find_nearest_support_resistance(price, swing_highs, swing_lows)
+
+    summary_parts = [f"Daily trend: {trend}"]
+    if not pd.isna(ma7):
+        summary_parts.append(f"MA7={ma7:.1f} MA25={ma25:.1f} MA99={ma99:.1f}")
+    summary_parts.append(f"RSI={rsi:.1f}")
+    if support:
+        summary_parts.append(f"Support={support:.1f}")
+    if resistance:
+        summary_parts.append(f"Resistance={resistance:.1f}")
+
+    return {
+        "trend": trend,
+        "daily_ma7": round(ma7, 1) if not pd.isna(ma7) else None,
+        "daily_ma25": round(ma25, 1) if not pd.isna(ma25) else None,
+        "daily_ma99": round(ma99, 1) if not pd.isna(ma99) else None,
+        "daily_rsi": round(rsi, 1),
+        "key_support": round(support, 1) if support else None,
+        "key_resistance": round(resistance, 1) if resistance else None,
+        "daily_summary": " | ".join(summary_parts),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +272,8 @@ def analyze(df: pd.DataFrame, low_24h: float) -> Optional[Signal]:
     swing_highs, swing_lows = find_swing_points(df, lookback=5)
     support, resistance = find_nearest_support_resistance(price, swing_highs, swing_lows)
     ma_cross = check_ma_crossover(df)
+    signum_cross = detect_signum_crossover(df)
+    signum_score = compute_signum_score(df)
     has_higher_lows = detect_higher_lows(df)
     has_lower_highs = detect_lower_highs(df)
     bounce_candle = latest["close"] > latest["open"] and prev["close"] < prev["open"]
@@ -428,6 +531,103 @@ def analyze(df: pd.DataFrame, low_24h: float) -> Optional[Signal]:
                     reason=" | ".join(reasons), confidence=min(confidence, 1.0)
                 )
 
+    # --- NEW: Signum momentum signal (strong alignment across indicators) ---
+    if best_signal is None:
+        if signum_score >= 4 and bounce_candle:
+            # Strong bullish alignment: price up, MAs bullish, RSI > 50, volume up
+            reasons = [f"Signum momentum +{signum_score}/5 (strong bullish alignment)"]
+            confidence = 0.55
+            if signum_score == 5:
+                reasons.append("Perfect bullish alignment")
+                confidence += 0.1
+            if has_higher_lows:
+                reasons.append("Higher lows pattern")
+                confidence += 0.1
+            if signum_cross == "BULLISH":
+                reasons.append("Signum MA crossover confirms")
+                confidence += 0.1
+            if rsi < 40:
+                reasons.append(f"RSI still low ({rsi:.1f}) — room to run")
+                confidence += 0.05
+
+            sl_ref = support if support else low_24h
+            sl = sl_ref * (1 - buffer_pct)
+            risk = price - sl
+            if risk > 0:
+                tp = price + (risk * Config.RISK_REWARD_RATIO)
+                best_signal = Signal(
+                    direction="LONG", entry_price=price,
+                    stop_loss=round(sl, 1), take_profit=round(tp, 1),
+                    reason=" | ".join(reasons), confidence=min(confidence, 1.0)
+                )
+
+        elif signum_score <= -4 and rejection_candle:
+            # Strong bearish alignment: price down, MAs bearish, RSI < 50, volume up
+            reasons = [f"Signum momentum {signum_score}/5 (strong bearish alignment)"]
+            confidence = 0.55
+            if signum_score == -5:
+                reasons.append("Perfect bearish alignment")
+                confidence += 0.1
+            if has_lower_highs:
+                reasons.append("Lower highs pattern")
+                confidence += 0.1
+            if signum_cross == "BEARISH":
+                reasons.append("Signum MA crossover confirms")
+                confidence += 0.1
+            if rsi > 60:
+                reasons.append(f"RSI still high ({rsi:.1f}) — room to fall")
+                confidence += 0.05
+
+            sl_ref = resistance if resistance else latest["ma99"]
+            sl = sl_ref * (1 + buffer_pct)
+            risk = sl - price
+            if risk > 0:
+                tp = price - (risk * Config.RISK_REWARD_RATIO)
+                best_signal = Signal(
+                    direction="SHORT", entry_price=price,
+                    stop_loss=round(sl, 1), take_profit=round(tp, 1),
+                    reason=" | ".join(reasons), confidence=min(confidence, 1.0)
+                )
+
+    # --- Whale / Smart Money confidence adjustment ---
+    if best_signal:
+        try:
+            from whale_tracker import get_whale_signals
+            whale = get_whale_signals()
+            whale_sig = whale.get("signal", "NEUTRAL")
+            whale_info = (f"🐋 Whale: {whale_sig} (Long={whale['top_trader_long_pct']}% "
+                          f"Taker={whale['taker_buy_ratio']} OI Δ={whale['oi_change_pct']}%)")
+            best_signal.reason += f" | {whale_info}"
+
+            if whale_sig != "NEUTRAL":
+                aligns = ((best_signal.direction == "LONG" and whale_sig == "BULLISH") or
+                          (best_signal.direction == "SHORT" and whale_sig == "BEARISH"))
+                conflicts = ((best_signal.direction == "LONG" and whale_sig == "BEARISH") or
+                             (best_signal.direction == "SHORT" and whale_sig == "BULLISH"))
+                if aligns:
+                    best_signal.confidence = min(best_signal.confidence + 0.10, 1.0)
+                    best_signal.reason += " | 🐋 Whale confirms"
+                elif conflicts:
+                    best_signal.confidence = max(best_signal.confidence - 0.10, 0.0)
+                    best_signal.reason += " | ⚠️ 🐋 Whale opposes"
+        except Exception as e:
+            logger.warning(f"Whale tracker error: {e}")
+
+    # --- Signum confidence adjustment on final signal ---
+    if best_signal:
+        if best_signal.direction == "LONG" and signum_score >= 3:
+            best_signal.confidence = min(best_signal.confidence + 0.05, 1.0)
+            best_signal.reason += f" | Signum +{signum_score} confirms"
+        elif best_signal.direction == "LONG" and signum_score <= -3:
+            best_signal.confidence = max(best_signal.confidence - 0.1, 0.0)
+            best_signal.reason += f" | ⚠️ Signum {signum_score} opposes"
+        elif best_signal.direction == "SHORT" and signum_score <= -3:
+            best_signal.confidence = min(best_signal.confidence + 0.05, 1.0)
+            best_signal.reason += f" | Signum {signum_score} confirms"
+        elif best_signal.direction == "SHORT" and signum_score >= 3:
+            best_signal.confidence = max(best_signal.confidence - 0.1, 0.0)
+            best_signal.reason += f" | ⚠️ Signum +{signum_score} opposes"
+
     # --- Log result ---
     if best_signal:
         icon = "🟢" if best_signal.direction == "LONG" else "🔴"
@@ -436,11 +636,12 @@ def analyze(df: pd.DataFrame, low_24h: float) -> Optional[Signal]:
             f"   Entry: {best_signal.entry_price:.1f} | SL: {best_signal.stop_loss:.1f} "
             f"| TP: {best_signal.take_profit:.1f} | Conf: {best_signal.confidence:.0%}"
         )
+        logger.info(f"   Signum score: {signum_score:+d}/5")
         return best_signal
 
     # No signal
     logger.debug(
-        f"No signal | Price: {price:.1f} | RSI: {rsi:.1f} | MA7: {latest['ma7']:.1f} "
+        f"No signal | Price: {price:.1f} | RSI: {rsi:.1f} | Signum: {signum_score:+d} | MA7: {latest['ma7']:.1f} "
         f"MA25: {latest['ma25']:.1f} MA99: {latest['ma99']:.1f} | 24hLow: {low_24h:.1f}"
     )
     return None

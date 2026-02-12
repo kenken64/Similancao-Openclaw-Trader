@@ -82,10 +82,15 @@ class BinanceFuturesClient:
         except Exception:
             pass  # Already set
 
-    def get_klines(self, limit: int = 150) -> pd.DataFrame:
-        """Fetch kline/candlestick data as DataFrame."""
+    def get_klines(self, limit: int = 150, interval: str = None) -> pd.DataFrame:
+        """Fetch kline/candlestick data as DataFrame.
+
+        Args:
+            limit: Number of candles to fetch.
+            interval: Kline interval (e.g. '1d', '4h'). Defaults to Config.TIMEFRAME.
+        """
         klines = self._get("/fapi/v1/klines", {
-            "symbol": self.symbol, "interval": Config.TIMEFRAME, "limit": limit
+            "symbol": self.symbol, "interval": interval or Config.TIMEFRAME, "limit": limit
         })
         df = pd.DataFrame(klines, columns=[
             "open_time", "open", "high", "low", "close", "volume",
@@ -109,6 +114,10 @@ class BinanceFuturesClient:
         """Get current open position for symbol, or None."""
         if self.dry_run:
             return None
+        return self.get_live_position()
+
+    def get_live_position(self) -> Optional[Dict[str, Any]]:
+        """Get current open position from Binance, regardless of dry_run mode."""
         try:
             positions = self._get("/fapi/v2/positionRisk",
                                   self._timestamp_params({"symbol": self.symbol}))
@@ -171,36 +180,73 @@ class BinanceFuturesClient:
             return None
 
     def place_stop_loss(self, side: str, quantity: float, stop_price: float) -> Optional[Dict]:
-        """Place stop-market order."""
+        """Place stop-market order. Falls back to software SL if API rejects."""
         if self.dry_run:
             logger.info(f"🧪 [DRY-RUN] Stop-loss {side} @ {stop_price}")
             return {"orderId": "dry-run-sl"}
         try:
-            order = self._post("/fapi/v1/order", self._signed_params({
+            params = {
                 "symbol": self.symbol, "side": side, "type": "STOP_MARKET",
-                "stopPrice": round(stop_price, 1), "closePosition": "true"
-            }))
-            logger.info(f"✅ Stop-loss set @ {stop_price}")
+                "stopPrice": str(round(stop_price, 1)),
+                "quantity": str(quantity),
+                "reduceOnly": "true"
+            }
+            logger.info(f"📤 SL order params: {params}")
+            order = self._post("/fapi/v1/order", self._signed_params(params))
+            logger.info(f"✅ Stop-loss set @ {stop_price} (exchange)")
             return order
         except Exception as e:
-            logger.error(f"❌ Stop-loss failed: {e}")
+            logger.warning(f"⚠️ Exchange SL failed: {e} — using SOFTWARE stop-loss")
+            # Return a marker so the bot knows to use software SL
+            return {"orderId": "software-sl", "software_sl": True, "stop_price": stop_price, "side": side, "quantity": quantity}
+
+    def close_position_market(self, side: str, quantity: float) -> Optional[Dict]:
+        """Emergency market close for software stop-loss."""
+        try:
+            order = self._post("/fapi/v1/order", self._signed_params({
+                "symbol": self.symbol, "side": side, "type": "MARKET",
+                "quantity": str(quantity), "reduceOnly": "true"
+            }))
+            logger.info(f"🛑 Software SL triggered — Market {side} {quantity} {self.symbol}")
+            return order
+        except Exception as e:
+            logger.error(f"❌ Emergency close failed: {e}")
             return None
 
     def place_take_profit(self, side: str, quantity: float, stop_price: float) -> Optional[Dict]:
-        """Place take-profit market order."""
+        """Place take-profit market order. Falls back to software TP if API rejects."""
         if self.dry_run:
             logger.info(f"🧪 [DRY-RUN] Take-profit {side} @ {stop_price}")
             return {"orderId": "dry-run-tp"}
         try:
-            order = self._post("/fapi/v1/order", self._signed_params({
+            params = {
                 "symbol": self.symbol, "side": side, "type": "TAKE_PROFIT_MARKET",
-                "stopPrice": round(stop_price, 1), "closePosition": "true"
-            }))
-            logger.info(f"✅ Take-profit set @ {stop_price}")
+                "stopPrice": str(round(stop_price, 1)),
+                "quantity": str(quantity),
+                "reduceOnly": "true"
+            }
+            logger.info(f"📤 TP order params: {params}")
+            order = self._post("/fapi/v1/order", self._signed_params(params))
+            logger.info(f"✅ Take-profit set @ {stop_price} (exchange)")
             return order
+        except requests.exceptions.HTTPError as e:
+            body = e.response.text if e.response is not None else "no body"
+            logger.warning(f"⚠️ Exchange TP failed: {e} — {body} — using SOFTWARE take-profit")
+            return {"orderId": "software-tp", "software_tp": True, "stop_price": stop_price, "side": side, "quantity": quantity}
         except Exception as e:
             logger.error(f"❌ Take-profit failed: {e}")
             return None
+
+    def get_recent_user_trades(self, limit: int = 20) -> List[Dict]:
+        """Get recent account trades from Binance (itemized fills)."""
+        if self.dry_run:
+            return []
+        try:
+            return self._get("/fapi/v1/userTrades",
+                             self._timestamp_params({"symbol": self.symbol, "limit": limit}))
+        except Exception as e:
+            logger.error(f"Error fetching user trades: {e}")
+            return []
 
     def cancel_all_orders(self):
         """Cancel all open orders for the symbol."""

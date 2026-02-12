@@ -49,3 +49,6 @@ class Config:
     # Advisor Mode — ask Similancao before trading
     ADVISOR_MODE = os.getenv("ADVISOR_MODE", "true").lower() == "true"
     ADVISOR_TIMEOUT_SECONDS = int(os.getenv("ADVISOR_TIMEOUT_SECONDS", "120"))
+
+    # Trade cooldown — minimum seconds between trades to prevent overtrading
+    TRADE_COOLDOWN_SECONDS = int(os.getenv("TRADE_COOLDOWN_SECONDS", "300"))
